@@ -1,0 +1,33 @@
+name:                smarthome
+version:             0.1.0.0
+-- synopsis:
+-- description:
+homepage:            https://github.com/githubuser/smarthome#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Author name here
+maintainer:          example@example.com
+copyright:           2017 Author name here
+category:            Web
+build-type:          Simple
+cabal-version:       >=1.10
+extra-source-files:  README.md
+
+executable smarthome
+  ghc-options:         -Wall -threaded -fno-warn-name-shadowing
+  hs-source-dirs:      src
+  main-is:             Main.hs
+  other-modules:       Data.RoseTree
+                     , Data.RoseTree.Zipper
+                     , Widgets.Tree
+  default-language:    Haskell2010
+  default-extensions:  RecordWildCards
+  build-depends:       base >= 4.7 && < 5
+                     , reactive-banana >= 1.1
+                     , brick==0.29
+                     , text
+                     , word-wrap
+                     , vector
+                     , vty
+                     , microlens
+                     , comonad
