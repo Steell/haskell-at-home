@@ -60,34 +60,22 @@ smarthomeApp =
     attrs _ =
       attrMap defAttr [(treeSelectedAttr, defAttr `V.withStyle` V.reverseVideo)]
 
-index :: Zipper (Bool, e) -> Int
-index z@Zipper{_context = (ls, _, _) : _,..} =
-    1 + sum (fmap (length . viewTree) ls) + index (up z)
-index _ = 0
-
-viewTree :: RoseTree (Bool, e) -> [Zipper (Bool, e)]
-viewTree a = go (fromRoseTree a)
-  where
-    collapsed z = not . fst $ extract z
-    go z | collapsed z = [ z ]
-         | otherwise = z : maybe [] descent (downM z)
-    descent z = go z <> maybe [] descent (rightM z)
-
 main :: IO ()
 main = do
   _ <- defaultMain smarthomeApp ashView
   return ()
   where
-    convertH :: Home [] -> DeviceTree
-    convertH Home {..} = RoseTree (fmap convertR _rooms) (Device _homeName)
-    convertR :: Room [] -> DeviceTree
-    convertR Room {..} =
-      RoseTree (fmap convertD _devices) (Device _roomName)
-    convertD :: Device -> DeviceTree
-    convertD d = RoseTree [] d
     ashView :: AppState Text
     ashView = AppState {_deviceTree = tree "deviceTree" (convertH ash) 1}
 
+
+convertH :: Home [] -> DeviceTree
+convertH Home {..} = RoseTree (fmap convertR _rooms) (Device _homeName)
+convertR :: Room [] -> DeviceTree
+convertR Room {..} =
+  RoseTree (fmap convertD _devices) (Device _roomName)
+convertD :: Device -> DeviceTree
+convertD d = RoseTree [] d
 
 ash :: Home []
 ash =
