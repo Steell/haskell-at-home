@@ -10,8 +10,8 @@ import Control.Monad
 import qualified Data.List as List
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Time.Clock
-import Data.Time.Horizon
+-- import Data.Time.Clock
+-- import Data.Time.Horizon
 import Foreign.C.Types hiding (CBool)
 import Reactive.Banana.Combinators
 
@@ -66,7 +66,7 @@ myconfig = List.foldl' (unionWith (>>)) never <$> sequenceA [ singleDimmerCfg gu
                                                             , multiDimmerCfg bedroom
                                                             , multiDimmerCfg livingroom
                                                             , globalCfg all
-							    , entranceCfg frontDoorSensor [livingroomEntry]
+							    -- , entranceCfg frontDoorSensor [livingroomEntry]
                                                             ]
   where
     livingroom = [ livingroomEntry, livingroomMantle, livingroomSeating ]
@@ -83,6 +83,7 @@ myconfig = List.foldl' (unionWith (>>)) never <$> sequenceA [ singleDimmerCfg gu
     washerOutlet = 10
     frontDoorSensor = 11
 
+{-
 entranceCfg :: NodeId -> [NodeId] -> ZWave Moment (Event (IO ()))
 entranceCfg entry lights = do
     entryDevice <- getDeviceById entry
@@ -98,6 +99,14 @@ entranceCfg entry lights = do
 
     sunB <- isSunOut
     return . setLevelsOnEvt $ whenE (not <$> sunB) newLevelEvt
+
+isSunOut :: Monad m => ZWave m (Behavior Bool)
+isSunOut = currentTimeB <&> fmap (\ (UTCTime day time) ->
+    let (UTCTime _ morning) = sunrise day 42.458429 (-71.066163)
+        (UTCTime _ evening) = sunset day 42.458429 (-71.066163)
+    in
+        time >= morning && time <= evening)
+-}
 
 dimmerCfg :: [NodeId] -> [NodeId] -> (Scene -> Maybe CUChar) -> ZWave Moment (Event (IO ()))
 dimmerCfg ins outs toLevel = do
@@ -186,13 +195,6 @@ singleDimmerCfg d = do
         Just 0
 
     liftM ff a = join $ fmap ($ a) ff
-
-isSunOut :: Monad m => ZWave m (Behavior Bool)
-isSunOut = currentTimeB <&> fmap (\ (UTCTime day time) ->
-    let (UTCTime _ morning) = sunrise day 42.458429 (-71.066163)
-        (UTCTime _ evening) = sunset day 42.458429 (-71.066163)
-    in
-        time >= morning && time <= evening)
 
 {-
 data Home l = Home

@@ -17,35 +17,35 @@ executable smarthome
   ghc-options:         -Wall -threaded -dynamic -fno-warn-name-shadowing
   hs-source-dirs:      src
   main-is:             Main.hs
-  other-modules:       Data.RoseTree
-                     , Data.RoseTree.Zipper
-                     , Widgets.Tree
-                     , Internal.OpenZWave
-                     , Daemon
-                     , ReactiveDaemon
+  other-modules:       ReactiveDaemon
                      , ReactiveDaemon.OpenZWave
+                     -- , Data.RoseTree
+                     -- , Data.RoseTree.Zipper
+                     -- , Widgets.Tree
+                     -- , Internal.OpenZWave
+                     -- , Daemon
   default-language:    Haskell2010
   default-extensions:  RecordWildCards
   build-depends:       base >= 4.7 && < 5
-                     , brick
-                     , text
-                     , word-wrap
-                     , vector
-                     , vty
-                     , microlens
-                     , comonad
+                     -- , brick
+                     -- , text
+                     -- , word-wrap
+                     -- , vector
+                     -- , vty
+                     -- , microlens
+                     -- , comonad
                      , haskell-openzwave
-                     , reactive-banana
+                     , reactive-banana >= 1.2
                      , hoppy-runtime >= 0.3
-                     , time
-                     , daemons
-                     , pipes
-                     , cereal
-                     , stm
-                     , data-default
-                     , bytestring
-                     , lens
+                     -- , time >= 1.9
+--                     , daemons
+                     -- , pipes >= 4.3
+--                     , cereal
+--                     , stm
+--                     , data-default
+--                     , bytestring
+                     , lens >= 4.16
                      , containers >= 0.5
-                     , mtl
+                     , mtl >= 2.2
                      , pretty >= 1.1
-                     , horizon
+--                     , horizon

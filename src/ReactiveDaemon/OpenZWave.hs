@@ -4,8 +4,8 @@ module ReactiveDaemon.OpenZWave where
 import Control.Applicative
 import Control.Lens
 import Control.Monad
-import Data.Time.Clock.System
-import Data.Time.Format
+-- import Data.Time.Clock.System
+-- import Data.Time.Format
 import Data.Word
 import Foreign.C.Types hiding (CBool)
 import Foreign.Hoppy.Runtime
@@ -87,11 +87,11 @@ registerNotificationEvent m =
     convertNotification :: Z.NotificationConst -> IO Notification
     convertNotification !n = do
         notifType <- Z.notification_GetType n
-        t <- systemToUTCTime <$> getSystemTime
-        let timestamp = formatTime defaultTimeLocale
-                                   (dateTimeFmt defaultTimeLocale)
-                                   t
-        putStrLn $ timestamp ++ ": " ++ show notifType
+        -- t <- systemToUTCTime <$> getSystemTime
+        -- let timestamp = formatTime defaultTimeLocale
+        --                            (dateTimeFmt defaultTimeLocale)
+        --                            t
+        -- putStrLn $ timestamp ++ ": " ++ show notifType
         case notifType of
             Z.NotificationType_DriverReady ->
                 DriverReady <$> Z.notification_GetHomeId n

@@ -21,7 +21,7 @@ import qualified Data.List as List
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe
-import qualified Data.Time.Clock as Clock
+-- import qualified Data.Time.Clock as Clock
 import Foreign.C.Types hiding (CBool)
 import qualified OpenZWave.Ozw as Z
 import Reactive.Banana
@@ -29,19 +29,22 @@ import Reactive.Banana.Frameworks
 import Text.PrettyPrint
 
 -- Daemons
-import Control.Pipe.Serialize (serializer, deserializer)
-import Pipes ( runEffect, (<-<), await, yield )
-import Control.Pipe.Socket (Handler)
-import Control.Concurrent.TVar (TVar, newTVar, modifyTVar)
-import Network.Socket ( withSocketsDo )
-import System.Daemon
+-- import Control.Pipe.Serialize (serializer, deserializer)
+-- import Pipes ( runEffect, (<-<), await, yield )
+-- import Control.Pipe.Socket (Handler)
+-- import Control.Concurrent.TVar (TVar, newTVar, modifyTVar)
+-- import Network.Socket ( withSocketsDo )
+-- import System.Daemon
 
 -- Local
 import ReactiveDaemon.OpenZWave
 
 ----
 
-data Cmd = ListDevices | FixNetwork | SetValue ZNode ZValue ZValueData | InitOzw
+data Cmd = ListDevices
+         | FixNetwork
+         -- | SetValue ZNode ZValue ZValueData
+         | InitOzw
 makePrisms ''Cmd
 
 data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
@@ -63,7 +66,7 @@ makeLenses ''ZWaveValue
 
 data ZWData = ZWData { _zwdMap     :: Behavior DeviceMap
                      , _zwdChanged :: Event (NodeId, ValueId, ValueData)
-		     , _zwdCurrentTime :: Behavior Clock.UTCTime
+		     -- , _zwdCurrentTime :: Behavior Clock.UTCTime
                      }
 makeClassy ''ZWData
 
@@ -73,6 +76,8 @@ newtype ZWave m a = ZWave { unzwio :: ReaderT ZWData m a }
 data ZWaveEvent = DeviceList DeviceMap
 
 ----
+
+{-
 
 dMain2 :: IO ()
 dMain2 = withSocketsDo $ do
@@ -168,7 +173,9 @@ ozwLoop mgr c = void $ registerNotificationEvent mgr handler
       writeTChan c $
         ns & devices %~
           Map.update (partial (not . Map.null) . Map.delete vid) nid
-    
+
+-}
+
 dNetwork :: Z.Manager
          -> (String -> IO ())
          -> AddHandler Cmd
@@ -177,7 +184,7 @@ dNetwork :: Z.Manager
 dNetwork mgr write cmdHandler cfg = do
     -- inputs
     eCmd <- fromAddHandler cmdHandler
-    eNotif <- fromAddHandler $ registerNotificationEvent mgr
+    eNotif <- fromAddHandler . AddHandler $ registerNotificationEvent mgr
 
     -- graph
     let eDriverReady = filterJust $ (preview _DriverReady) <$> eNotif
@@ -190,9 +197,13 @@ dNetwork mgr write cmdHandler cfg = do
     bDeviceMap <- valueMapB mgr eValueInfoAdded eValueChanged eValueRemoved
     let eAllNodesQueried = filterJust $ (preview _AwakeNodesQueried) <$> eNotif
 
-    currentTimeB <- fromPoll Clock.getCurrentTime
+    -- currentTimeB <- fromPoll Clock.getCurrentTime
 
-    eCfg <- liftMoment . flip runReaderT (ZWData bDeviceMap eValueChanged currentTimeB) $
+    eCfg <- liftMoment . flip runReaderT
+                              (ZWData bDeviceMap
+                                      eValueChanged
+                                      -- currentTimeB
+                              ) $
                 unzwio cfg
     activeCfg <- switchE $ eAllNodesQueried $> eCfg
     reactimate activeCfg
@@ -272,8 +283,8 @@ partial p x = if p x then Just x else Nothing
 --TODO: probably gonna want two monads: ZWaveConfig and ZWaveAction
 --      maybe this lends itself more to Reflex than it does reactive-banana?
 
-currentTimeB :: Monad m => ZWave m (Behavior Clock.UTCTime)
-currentTimeB = view zwdCurrentTime
+-- currentTimeB :: Monad m => ZWave m (Behavior Clock.UTCTime)
+-- currentTimeB = view zwdCurrentTime
 
 getValue :: ZWaveValue -> Behavior (Maybe ValueData)
 getValue ZWaveValue{..} = fmap (fmap (view _3)) _zwvInfo
