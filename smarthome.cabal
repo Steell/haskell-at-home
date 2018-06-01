@@ -14,20 +14,38 @@ cabal-version:       >=1.10
 extra-source-files:  README.md
 
 executable smarthome
-  ghc-options:         -Wall -threaded -fno-warn-name-shadowing
+  ghc-options:         -Wall -threaded -dynamic -fno-warn-name-shadowing
   hs-source-dirs:      src
   main-is:             Main.hs
   other-modules:       Data.RoseTree
                      , Data.RoseTree.Zipper
                      , Widgets.Tree
+                     , Internal.OpenZWave
+                     , Daemon
+                     , ReactiveDaemon
+                     , ReactiveDaemon.OpenZWave
   default-language:    Haskell2010
   default-extensions:  RecordWildCards
   build-depends:       base >= 4.7 && < 5
-                     , reactive-banana >= 1.1
-                     , brick==0.29
+                     , brick
                      , text
                      , word-wrap
                      , vector
                      , vty
                      , microlens
                      , comonad
+                     , haskell-openzwave
+                     , reactive-banana
+                     , hoppy-runtime >= 0.3
+                     , time
+                     , daemons
+                     , pipes
+                     , cereal
+                     , stm
+                     , data-default
+                     , bytestring
+                     , lens
+                     , containers >= 0.5
+                     , mtl
+                     , pretty >= 1.1
+                     , horizon

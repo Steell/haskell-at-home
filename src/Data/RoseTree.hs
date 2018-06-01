@@ -10,3 +10,7 @@ node (RoseTree _ n) = n
 
 instance Functor RoseTree where
   fmap f (RoseTree cs n) = RoseTree (fmap (fmap f) cs) (f n)
+
+foldTree :: (a -> [b] -> b) -> RoseTree a -> b
+foldTree f = go
+  where go (RoseTree cs n) = f n $ fmap go cs

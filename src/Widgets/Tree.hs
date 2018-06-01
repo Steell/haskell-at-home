@@ -1,18 +1,20 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE LambdaCase, TupleSections #-}
 module Widgets.Tree
-    ( Tree
-    , tree
-    , renderTree
-    , handleTreeEvent
-    , treeSelectedAttr
-    ) where
+  ( Tree
+  , tree
+  , renderTree
+  , handleTreeEvent
+  , treeSelectedAttr
+--  , treeSelectedL
+  ) where
 
 import Brick
 import Brick.Widgets.List
 
 import Control.Comonad
+import Control.Lens hiding (children, index)
+import Control.Monad (join)
 
-import Data.Monoid ((<>))
 import Data.RoseTree
 import Data.RoseTree.Zipper (Zipper(..))
 import qualified Data.RoseTree.Zipper as Zipper
@@ -21,12 +23,10 @@ import qualified Data.Vector as Vector
 
 import Graphics.Vty.Input.Events
 
-import Lens.Micro ((.~), (&))
-
 newtype Tree n e = Tree { _unTree :: List n (Zipper (Bool, e)) }
 
 treeSelectedAttr :: AttrName
-treeSelectedAttr = listSelectedAttr
+treeSelectedAttr = listSelectedAttr --TODO: custom attr
 
 tree :: n -> RoseTree e -> Int -> Tree n e
 tree n t h = Tree $
@@ -83,9 +83,10 @@ viewZipper :: Zipper (Bool, e) -> Vector (Zipper (Bool, e))
 viewZipper = Vector.fromList . viewTree . Zipper.toRoseTree
 
 viewTree :: RoseTree (Bool, e) -> [Zipper (Bool, e)]
-viewTree a = go (Zipper.fromRoseTree a)
+viewTree = foldTree go . Zipper.toRoseTree . duplicate . Zipper.fromRoseTree
   where
-    collapsed z = not . fst $ extract z
-    go z | collapsed z = [ z ]
-         | otherwise = z : maybe [] descent (Zipper.downM z)
-    descent z = go z <> maybe [] descent (Zipper.rightM z)
+    go :: Zipper (Bool, e) -> [[Zipper (Bool, e)]] -> [Zipper (Bool, e)]
+    go n cs =
+      if fst (extract n)
+        then n : join cs
+        else [n]

@@ -22,11 +22,21 @@ instance Comonad Zipper where
   extract Zipper {_tree = RoseTree _ n} = n
   duplicate z = Zipper (dupedTree z) (dupedContext z)
     where
-      dupedTree z = RoseTree (dupedTree <$> iterate right (down z)) z
-      dupedContext z =
-        (dupedLefts (left z), z, dupedRights (right z)) : dupedContext (up z)
-      dupedLefts = fmap dupedTree . iterate left
-      dupedRights = fmap dupedTree . iterate right
+      dupedTree z =
+        RoseTree (maybe [] (fmap dupedTree . iterateM rightM) (downM z)) z
+      dupedCrumbs z =
+        (maybe [] dupedLefts (leftM z), z, maybe [] dupedRights (rightM z)) :
+        dupedContext z
+      dupedContext z = maybe [] dupedCrumbs $ upM z
+      dupedLefts = fmap dupedTree . iterateM leftM
+      dupedRights = fmap dupedTree . iterateM rightM
+
+iterateM :: (a -> Maybe a) -> a -> [a]
+iterateM f x =
+  x :
+  case f x of
+    Nothing -> []
+    Just y -> iterateM f y
 
 upM, downM, leftM, rightM :: Zipper n -> Maybe (Zipper n)
 rightM Zipper {_context = (ls, n, r:rs):as, ..} =
@@ -55,11 +65,14 @@ generation :: Zipper n -> Int
 generation = length . _context
 
 toRoseTree :: Zipper n -> RoseTree n
-toRoseTree Zipper { _context=[], ..} = _tree
-toRoseTree z = toRoseTree (up z)
+toRoseTree z = case upM z of Nothing -> _tree z
+                             Just z -> toRoseTree z
 
 fromRoseTree :: RoseTree n -> Zipper n
 fromRoseTree tree = Zipper tree []
 
 modifyData :: (n -> n) -> Zipper n -> Zipper n
 modifyData f z@Zipper {_tree = RoseTree cs n} = z {_tree = RoseTree cs (f n)}
+
+insert :: n -> Zipper n -> Zipper n
+insert = modifyData . const
