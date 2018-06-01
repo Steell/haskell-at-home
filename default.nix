@@ -5,8 +5,8 @@ let
   hozw = haskellPackages.callPackage (nixpkgs.fetchFromGitHub {
     owner = "Steell";
     repo = "haskell-openzwave";
-    rev = "ded32770eab9173d37632b5ce3fcd62b4ec0d641";
-    sha256 = "0pyx4hrlrrzi8jj6vfc8k2lmvbq7nwkc5x31f4j3gpcfwh53iq8i";
+    rev = "1cf5f2da3ec4afc96b0ac3a9c466f3c8669ac65a";
+    sha256 = "1frjmmsj489ib7gz0ig18b5z7gksqnl9k9y6xgr95rjql61j653y";
   }) { inherit openzwave; };
 in
 
@@ -18,3 +18,4 @@ in
 }:
 
 callCabal2nix "smarthome" ./. { inherit haskell-openzwave; }
+ 
