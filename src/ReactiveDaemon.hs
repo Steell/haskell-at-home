@@ -26,6 +26,7 @@ import Foreign.C.Types hiding (CBool)
 import qualified OpenZWave.Ozw as Z
 import Reactive.Banana
 import Reactive.Banana.Frameworks
+import System.Environment (getArgs)
 import Text.PrettyPrint
 
 -- Daemons
@@ -239,11 +240,13 @@ valueMapB mgr eAdded eChanged eRemoved =
 
 dMain :: ZWave Moment (Event (IO ())) -> IO ()
 dMain cfg = do
+    [device] <- getArgs
+  
     outputChan <- newChan
     (inputHandler, write) <- newAddHandler
 
     void . forkIO $ do
-        mgr <- initOzw defaultOptions
+        mgr <- initOzw defaultOptions { _driverPath = device }
         let nd = dNetwork mgr (writeChan outputChan) inputHandler cfg
         network <- compile nd
         actuate network
