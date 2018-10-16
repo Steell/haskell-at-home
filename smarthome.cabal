@@ -17,8 +17,12 @@ executable smarthome
   ghc-options:         -Wall -threaded -dynamic -fno-warn-name-shadowing
   hs-source-dirs:      src
   main-is:             Main.hs
-  other-modules:       ReactiveDaemon
-                     , ReactiveDaemon.OpenZWave
+  other-modules:       ReactiveDaemon.OpenZWave
+                     -- , ReactiveDaemon  
+                     , Api
+                     -- , AutoMap
+                     -- , Client2
+                     , Server
                      -- , Data.RoseTree
                      -- , Data.RoseTree.Zipper
                      -- , Widgets.Tree
@@ -28,24 +32,37 @@ executable smarthome
   default-extensions:  RecordWildCards
   build-depends:       base >= 4.7 && < 5
                      -- , brick
-                     -- , text
                      -- , word-wrap
                      -- , vector
                      -- , vty
                      -- , microlens
                      -- , comonad
                      , haskell-openzwave
-                     , reactive-banana >= 1.2
+                     -- , reactive-banana >= 1.2
                      , hoppy-runtime >= 0.3
                      -- , time >= 1.9
 --                     , daemons
                      -- , pipes >= 4.3
 --                     , cereal
---                     , stm
 --                     , data-default
---                     , bytestring
-                     , lens >= 4.16
+                     -- , lens >= 4.16
                      , containers >= 0.5
                      , mtl >= 2.2
                      , pretty >= 1.1
+
+                     , aeson
+                     , async
+                     , bimap
+                     , bytestring
+                     , conduit
 --                     , horizon
+                     , servant
+                     , servant-websockets
+                     , servant-client
+                     , servant-client-core
+                     , servant-server
+                     , stm
+                     , text
+                     , wai
+                     , warp
+                     , websockets
