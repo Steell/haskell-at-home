@@ -69,14 +69,13 @@ server :: ServerEnv -> ServerT API AppM
 server env = stateBroadcast env :<|> values
   where values hid did vid = postValue hid did vid :<|> getValue hid did vid
 
-postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM Value
+postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
 postValue hid did vid newVal = do
   ServerEnv {..} <- ask
   success <- liftIO $ Z.setValue _manager
                                  (Z.ZVID (fromInteger hid) (fromInteger vid))
                                  (convertToZWaveValue newVal)
   unless success $ throwError err404
-  getValue hid did vid
 
 getValue :: HomeId -> DeviceId -> ValueId -> AppM Value
 getValue hid did vid = do

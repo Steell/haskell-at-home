@@ -11,16 +11,13 @@ let
     (newPkgs: oldPkgs: with oldPkgs.haskell.lib; {
 
       haskellPackages = oldPkgs.haskellPackages.override {
-        overrides = haskellPackagesNew: haskellPackagesOld: {
-
-          #unliftio = doJailbreak haskellPackagesOld.unliftio;
-          #stm = doJailbreak haskellPackagesOld.stm;
+        overrides = haskellPackagesNew: haskellPackagesOld: rec {
 
           haskell-openzwave =
             haskellPackagesNew.callPackage ./haskell-openzwave { };
 
           smarthome =
-            haskellPackagesNew.callPackage ./default.nix { };
+            haskellPackagesNew.callPackage ./default.nix {};
 
         };
       };

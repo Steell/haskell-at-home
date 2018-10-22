@@ -2,12 +2,14 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -15,6 +17,7 @@ module Api where
 
 import           Conduit
 
+import           Control.Applicative
 import           Control.Concurrent.Async
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
@@ -28,7 +31,7 @@ import qualified Data.Conduit.List             as CL
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
 import           Data.Text                      ( Text )
-import qualified Data.Text                     as Text 
+import qualified Data.Text                     as Text
 import           Data.Word
 
 import           Foreign.C.Types
@@ -37,7 +40,7 @@ import           GHC.Generics
 
 import qualified Network.WebSockets            as WS
 
-import qualified ReactiveDaemon.OpenZWave as Z
+import qualified ReactiveDaemon.OpenZWave      as Z
 
 import           Servant.API
 import           Servant.API.WebSocketConduit
@@ -48,7 +51,7 @@ type HomeId = Integer
 type DeviceId = Integer
 type ValueId = Integer
 
--- TODO: re-implement (see below)
+-- TODO: preserve types and do convertion to/from in to/from JSON
 data ValueState = VBool Bool
                 | VByte Integer
                 | VDecimal Text
@@ -59,39 +62,40 @@ data ValueState = VBool Bool
                 | VString Text
                 | VButton
                 | VRaw
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 
 instance JSON.ToJSON ValueState
 instance JSON.FromJSON ValueState
 
 convertZWaveValue :: Z.ValueData -> ValueState
-convertZWaveValue (Z.VTBool b) = VBool b
-convertZWaveValue (Z.VTByte c) = VByte $ toInteger c
+convertZWaveValue (Z.VTBool    b) = VBool b
+convertZWaveValue (Z.VTByte    c) = VByte $ toInteger c
 convertZWaveValue (Z.VTDecimal s) = VDecimal $ Text.pack s
-convertZWaveValue (Z.VTInt i) = VInt i
-convertZWaveValue (Z.VTList i l) = VList i l
-convertZWaveValue Z.VTSchedule = VSchedule
-convertZWaveValue (Z.VTShort s) = VShort $ toInteger s
-convertZWaveValue (Z.VTString s) = VString $ Text.pack s
-convertZWaveValue Z.VTButton = VButton
-convertZWaveValue Z.VTRaw = VRaw
+convertZWaveValue (Z.VTInt     i) = VInt i
+convertZWaveValue (Z.VTList i l ) = VList i l
+convertZWaveValue Z.VTSchedule    = VSchedule
+convertZWaveValue (Z.VTShort  s)  = VShort $ toInteger s
+convertZWaveValue (Z.VTString s)  = VString $ Text.pack s
+convertZWaveValue Z.VTButton      = VButton
+convertZWaveValue Z.VTRaw         = VRaw
 
 convertToZWaveValue :: ValueState -> Z.ValueData
-convertToZWaveValue (VBool b) = Z.VTBool b
-convertToZWaveValue (VByte i) = Z.VTByte $ fromInteger i
+convertToZWaveValue (VBool    b) = Z.VTBool b
+convertToZWaveValue (VByte    i) = Z.VTByte $ fromInteger i
 convertToZWaveValue (VDecimal t) = Z.VTDecimal $ Text.unpack t
-convertToZWaveValue (VInt i) = Z.VTInt i
-convertToZWaveValue (VList i l) = Z.VTList i l
-convertToZWaveValue VSchedule = Z.VTSchedule
-convertToZWaveValue (VShort i) = Z.VTShort $ fromInteger i
-convertToZWaveValue (VString t) = Z.VTString $ Text.unpack t
-convertToZWaveValue VButton = Z.VTButton
-convertToZWaveValue VRaw = Z.VTRaw
+convertToZWaveValue (VInt     i) = Z.VTInt i
+convertToZWaveValue (VList i l ) = Z.VTList i l
+convertToZWaveValue VSchedule    = Z.VTSchedule
+convertToZWaveValue (VShort  i)  = Z.VTShort $ fromInteger i
+convertToZWaveValue (VString t)  = Z.VTString $ Text.unpack t
+convertToZWaveValue VButton      = Z.VTButton
+convertToZWaveValue VRaw         = Z.VTRaw
 
 data Value = Value { _valueId :: ValueId
                    , _valueState :: ValueState
+                   , _valueName :: String
                    }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 instance JSON.ToJSON Value
 instance JSON.FromJSON Value
 type ValueMap = Map ValueId Value
@@ -117,7 +121,7 @@ type API =
   :<|> Capture "home" HomeId
     :> Capture "device" DeviceId
     :> Capture "value" ValueId
-    :> (ReqBody '[JSON] ValueState :> Post '[JSON] Value
+    :> (ReqBody '[JSON] ValueState :> Post '[JSON] ()
       :<|> Get '[JSON] Value)
 
 --TODO: improve nested API
@@ -163,6 +167,7 @@ instance (RunWebSocketClient m, JSON.FromJSON o, JSON.ToJSON i) =>
     type Client m (WebSocketConduit i o) = ConduitClient o i -> m ()
     clientWithRoute _ _ req client = webSocketRequest client req
     hoistClientMonad _ _ f client c = f (client c)
+
 
 ----- ARCHIVED -----
 {- 

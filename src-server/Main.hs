@@ -99,6 +99,7 @@ main = do
                   value@Value {..} = Value
                       { _valueId    = valueId
                       , _valueState = convertZWaveValue vData
+                      , _valueName = _vInfoName
                       }
               in
                   s

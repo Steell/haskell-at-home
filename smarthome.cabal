@@ -13,53 +13,70 @@ build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
 
-executable smarthome
-  ghc-options:         -Wall -threaded -dynamic -fno-warn-name-shadowing
+library
   hs-source-dirs:      src
+  exposed-modules:     Api
+                     , ReactiveDaemon.OpenZWave
+  build-depends:       base >= 4.7 && < 5
+                     , haskell-openzwave
+                     , hoppy-runtime
+                     , containers
+                     , mtl
+                     , aeson
+                     , async
+                     , bytestring
+                     , conduit
+                     , servant
+                     , servant-client
+                     , servant-client-core
+                     , servant-websockets
+                     , text
+                     , websockets
+
+executable smarthome-reactive-client
+  ghc-options:         -Wall -threaded -fno-warn-name-shadowing
+  hs-source-dirs:      src-client
   main-is:             Main.hs
-  other-modules:       ReactiveDaemon.OpenZWave
-                     -- , ReactiveDaemon  
-                     , Api
-                     -- , AutoMap
-                     -- , Client2
-                     , Server
-                     -- , Data.RoseTree
-                     -- , Data.RoseTree.Zipper
-                     -- , Widgets.Tree
-                     -- , Internal.OpenZWave
-                     -- , Daemon
+  other-modules:       Client2
+                     , ClientApi
+                     , ReactiveDaemon
+  build-depends:       base >= 4.7 && < 5
+                     , smarthome
+                     , haskell-openzwave
+                     , reactive-banana
+                     , hoppy-runtime
+                     , containers
+                     , mtl
+                     , aeson
+                     , async
+                     , conduit
+--                     , horizon
+                     , http-client
+                     , lens
+                     , servant-websockets
+                     , servant
+                     , servant-client
+                     , servant-client-core
+                     , stm
+                     , text
+                     , websockets
+
+executable smarthome-server
+  ghc-options:         -Wall -threaded -fno-warn-name-shadowing
+  hs-source-dirs:      src-server
+  main-is:             Main.hs
+  other-modules:       Server
   default-language:    Haskell2010
   default-extensions:  RecordWildCards
   build-depends:       base >= 4.7 && < 5
-                     -- , brick
-                     -- , word-wrap
-                     -- , vector
-                     -- , vty
-                     -- , microlens
-                     -- , comonad
+                     , smarthome
                      , haskell-openzwave
-                     -- , reactive-banana >= 1.2
-                     , hoppy-runtime >= 0.3
-                     -- , time >= 1.9
---                     , daemons
-                     -- , pipes >= 4.3
---                     , cereal
---                     , data-default
-                     -- , lens >= 4.16
-                     , containers >= 0.5
-                     , mtl >= 2.2
-                     , pretty >= 1.1
-
+                     , hoppy-runtime
+                     , containers
+                     , mtl
                      , aeson
                      , async
-                     , bimap
-                     , bytestring
                      , conduit
---                     , horizon
-                     , servant
-                     , servant-websockets
-                     , servant-client
-                     , servant-client-core
                      , servant-server
                      , stm
                      , text
