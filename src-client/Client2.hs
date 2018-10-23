@@ -45,5 +45,5 @@ runClient cenv cfg = do
     (eventHandler, write) <- newAddHandler
     let client = clientIO cenv
         netDesc = dNetwork client cfg eventHandler
-    void . async . handleState client $ Conduit.mapM_ (liftIO . write)
     compile netDesc >>= actuate
+    void . handleState client $ Conduit.mapM_ (liftIO . write)
