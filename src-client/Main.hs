@@ -19,7 +19,6 @@ import           Network.HTTP.Client            ( newManager
                                                 )
 
 import           Reactive.Banana
-import           Reactive.Banana.Frameworks
 
 import           ReactiveDaemon
 

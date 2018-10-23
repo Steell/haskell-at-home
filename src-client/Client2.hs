@@ -28,7 +28,6 @@ import Reactive.Banana.Frameworks
 
 import ReactiveDaemon
 
-import           Servant.API                    ( (:<|>)(..) )
 import           Servant.Client                 ( Client, ClientM, ClientEnv, client, hoistClient, runClientM )
 
 clientIO :: ClientEnv -> Client IO API
@@ -46,4 +45,8 @@ runClient cenv cfg = do
     let client = clientIO cenv
         netDesc = dNetwork client cfg eventHandler
     compile netDesc >>= actuate
-    void . handleState client $ Conduit.mapM_ (liftIO . write)
+    void . handleState client $ do
+        liftIO $ putStrLn "Connected to server."
+        Conduit.mapM_ $ \evt -> liftIO $ do
+            putStrLn "Message received."
+            write evt

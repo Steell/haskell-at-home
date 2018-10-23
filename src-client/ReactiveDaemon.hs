@@ -14,7 +14,6 @@ import           Api
 
 import           ClientApi
 
-import           Control.Applicative
 import           Control.Arrow
 import           Control.Lens
 import           Control.Monad
@@ -23,7 +22,6 @@ import           Control.Monad.Reader
 import           Data.Foldable                  ( find )
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
-import           Data.Maybe
 -- import qualified Data.Time.Clock as Clock
 
 import           Reactive.Banana
@@ -76,7 +74,7 @@ instance MonadMoment m => MonadMoment (ZWave m) where
 
 dNetwork
   :: Client IO API
-  -> ZWave Moment (Event (IO ()))
+  -> ZWave Moment (Event (IO ())) --TODO: just use MomentIO and let user cfg have access to reactimate?
   -> AddHandler HomeMap
   -> MomentIO ()
 dNetwork client cfg evtHandler = do
@@ -100,11 +98,6 @@ whenJust mg f = maybe (pure ()) f mg
 partial :: (a -> Bool) -> a -> Maybe a
 partial p x = if p x then Just x else Nothing
 
------------------
-
---TODO: probably gonna want two monads: ZWaveConfig and ZWaveAction
---      maybe this lends itself more to Reflex than it does reactive-banana?
-
 -- currentTimeB :: Monad m => ZWave m (Behavior Clock.UTCTime)
 -- currentTimeB = view zwdCurrentTime
 
@@ -121,9 +114,18 @@ setValueByte' :: Monad m => ZWaveValue -> ZWave m (Behavior (Integer -> IO ()))
 setValueByte' ZWaveValue {..} = do
   setter <- view zwSetValue
   let getSetter :: Maybe ValueInfo -> Integer -> IO ()
-      getSetter Nothing = const $ pure ()
-      getSetter (Just ValueInfo {..}) =
-        void . setter _vHomeId _vDeviceId (_valueId _vInfo) . VByte
+      getSetter Nothing               _ = pure ()
+      getSetter (Just ValueInfo {..}) i = do
+        putStrLn
+          $  "{ node: "
+          ++ show _vDeviceId
+          ++ ", valueName: \""
+          ++ _valueName _vInfo
+          ++ "\", oldValue: "
+          ++ show (_valueState _vInfo)
+          ++ " } <= "
+          ++ show i
+        void . setter _vHomeId _vDeviceId (_valueId _vInfo) $ VByte i
   return $ getSetter <$> _zwvInfo
 
 getHomeById :: Monad m => HomeId -> ZWave m ZWaveHome

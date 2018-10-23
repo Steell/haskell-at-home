@@ -4,7 +4,6 @@ import           Api
 
 import           Servant.API
 import           Servant.Client
-import           Servant.Client.Core
 
 handleState :: Monad m => Client m API -> ConduitClient HomeMap () -> m ()
 handleState (f :<|> _) = f
