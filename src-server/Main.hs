@@ -44,18 +44,29 @@ main = do
 
     hookZWaveNotifications :: ServerEnv -> IO ()
     hookZWaveNotifications ServerEnv {..} = do
-        unregister <- Z.registerNotificationEvent _manager $ \notification ->
-            atomically $ do
+        unregister <- Z.registerNotificationEvent _manager $ \notification -> do
+            -- putStrLn $ "notif: " ++ show notification
+            -- map <-
+              atomically $ do
                 state <- readTVar _state
                 let state'@ZWaveState {..} = updateState notification state
                 writeTVar _state state'
                 writeTChan _stateBroadcastChan _homeMap
+                -- return _homeMap
+            -- putStrLn $ "newState: " ++ show map
         return ()
 
     -- TODO: this is a garbage fire
     updateState :: Z.Notification -> ZWaveState -> ZWaveState
     updateState n s@ZWaveState {..} = go n
       where
+        go (Z.DriverReady hid) =
+              let
+                  homeId   = toInteger hid
+                  home     = Home homeId Map.empty
+              in
+                  s { _homeMap = Map.insert homeId home _homeMap }
+
         go (Z.NodeAdded Z.NodeInfo {..}) =
             let
                 deviceId = toInteger _nodeId

@@ -10,6 +10,8 @@ let
   overlays = [
     (newPkgs: oldPkgs: with oldPkgs.haskell.lib; {
 
+      openzwave = newPkgs.callPackage ./openzwave+centralscene.nix { inherit (oldPkgs) openzwave; };
+
       haskellPackages = oldPkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
 

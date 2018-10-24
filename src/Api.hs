@@ -103,7 +103,7 @@ type ValueMap = Map ValueId Value
 data Device = Device { _deviceId :: DeviceId
                      , _deviceValues :: ValueMap
                      }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 instance JSON.ToJSON Device
 instance JSON.FromJSON Device
 type DeviceMap = Map DeviceId Device
@@ -111,7 +111,7 @@ type DeviceMap = Map DeviceId Device
 data Home = Home { _homeId :: HomeId
                  , _homeDevices :: DeviceMap
                  }
-  deriving (Show, Generic)
+  deriving (Eq, Show, Generic)
 instance JSON.ToJSON Home
 instance JSON.FromJSON Home
 type HomeMap = Map HomeId Home

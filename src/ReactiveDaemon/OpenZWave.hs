@@ -55,6 +55,7 @@ data ValueInfo = ValueInfo { _vInfoId   :: !ValueId
 
 
 data ZVID = ZVID !HomeId !CULLong
+  deriving (Show)
 
 data Notification
   = DriverReady !HomeId
@@ -66,6 +67,7 @@ data Notification
   | AwakeNodesQueried
   | AllNodesQueried
   | Unsupported !Z.NotificationType
+  deriving (Show)
 
 type NotificationListener = Notification -> IO ()
 
@@ -117,9 +119,10 @@ registerNotificationEvent m = addHandler
                 data' <- convertValue m v
                 nid   <- Z.valueID_GetNodeId v
                 vid   <- Z.valueID_GetId v
-                putStrLn $ "  " ++ show (nid, vid, name, data')
+		hid   <- Z.notification_GetHomeId n
+                putStrLn $ "  " ++ show (hid, nid, vid, name, data')
                 ValueChanged
-                    <$> Z.notification_GetHomeId n 
+                    <$> pure hid 
                     <*> pure nid 
                     <*> Z.valueID_GetId v 
                     <*> pure data'
