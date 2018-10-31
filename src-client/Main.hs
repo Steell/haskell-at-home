@@ -43,7 +43,7 @@ myconfig = do
     home <- getHomeById 4171812579
 
     strs <- showHomeEventDiff $ _zwhChanges home
-    let evts' = (\m -> putStrLn $ "HOME EVENT\n" ++ m) <$> strs
+    let evts' = putStrLn <$> strs
 
     List.foldl' (unionWith (>>)) never <$> sequenceA
         [ singleDimmerCfg home guestroom
