@@ -167,22 +167,14 @@ showHomeEventDiff e = do
         showDiff map =
             List.unlines
                 $   Map.toList map
-                <&> (\(d, c) -> showChange
+                <&> (\(d, c) -> show d ++ ": " ++ showChange
                         c
                         (\map' ->
                             List.unlines
                                 $   Map.toList map'
-                                <&> (\(v, c') -> showChange
+                                <&> (\(v, c') -> show v ++ ": " ++ showChange
                                         c'
-                                        (\(a, b) ->
-                                            show d
-                                                ++ ": "
-                                                ++ show v
-                                                ++ ": "
-                                                ++ show a
-                                                ++ " => "
-                                                ++ show b
-                                        )
+                                        (\(a, b) -> show a ++ " => " ++ show b)
                                     )
                         )
                     )
