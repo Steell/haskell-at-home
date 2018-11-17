@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeOperators #-}
 
-module Client2
-    ( runClient
+module Client (
+    runClient
     , Change(..)
     , mergeMaps
     )

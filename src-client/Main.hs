@@ -5,7 +5,7 @@ module Main where
 
 import           Api                     hiding ( getValue )
 
-import           Client2
+import           Client
 
 import           Control.Arrow
 import           Control.Lens

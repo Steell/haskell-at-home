@@ -54,7 +54,8 @@ executable smarthome-reactive-client
   ghc-options:         -Wall -threaded -fno-warn-name-shadowing
   hs-source-dirs:      src-client
   main-is:             Main.hs
-  other-modules:       Client2
+  other-modules:       Clientn
+                     , ClientApi
                      , ReactiveDaemon
   build-depends:       base >= 4.7 && < 5
                      , smarthome
