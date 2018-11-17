@@ -171,7 +171,6 @@ getDeviceById deviceId ZWaveHome {..} = do
     changes :: Event DeviceEvent
     changes = filterJust $ _zwhChanges <&> toDeviceEvent
 
-  --changes' <- {- distinct-} changes --TODO
   return ZWaveDevice {_zwdInfo = info, _zwdChanges = changes}
  where
   toDeviceEvent :: HomeEvent -> Maybe DeviceEvent
@@ -198,8 +197,8 @@ getDeviceValueByName name ZWaveDevice {..} = do
       info = _zwdInfo <&> (>>= mkValueInfo)
 
       blookup :: Behavior (DeviceEvent -> Maybe ValueEvent)
-      blookup = info <&> (\mVi de -> do 
-                               vi <- mVi 
+      blookup = info <&> (\mVi de -> do
+                               vi <- mVi
                                a <- extractValueInfo de
                                lookup vi a)
         where
@@ -212,8 +211,8 @@ getDeviceValueByName name ZWaveDevice {..} = do
 
       changes = filterJust $ blookup <@> _zwdChanges
 
-  --changes' <- {- distinct -} changes --TODO
-  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes}
+  changes' <- distinct changes
+  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes'}
 
 toMaybe :: Bool -> a -> Maybe a
 toMaybe True = Just
@@ -227,8 +226,7 @@ distinct = fmap (filterJust . fst) . mapAccum Nothing . fmap f
 
 {-
 
-TODO: need to account for events that might not originate from the ZWave graph
-
+-- TODO: need to account for events that might not originate from the ZWave graph
 data ZEventSource a = ZEventSource { _eventValueInfo :: ValueInfo
                                    , _eventDeviceInfo :: DeviceInfo
                                    , _eventHomeInfo :: HomeInfo
@@ -236,7 +234,7 @@ data ZEventSource a = ZEventSource { _eventValueInfo :: ValueInfo
                                    }
 
 instance Functor ZEventSource where
-  fmap f es = es { _eventData = f (_eventData es) } 
+  fmap f es = es { _eventData = f (_eventData es) }
 
 -}
 

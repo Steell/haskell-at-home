@@ -86,11 +86,11 @@ entranceCfg entry lights = do
 
     let setLevelsOnEvt byte = List.foldl (unionWith (>>)) never $
             flip setValueByteOnEvt byte .
-	        getDeviceValueByName "Level" <$>
-		lightDevs
+                getDeviceValueByName "Level" <$>
+                lightDevs
         newLevelEvt = entryDevice & (getDoorEvent >>> fmap toLevel >>> filterJust)
         toLevel Closed = Nothing
-	toLevel Open = Just 0xFF -- last setting
+        toLevel Open = Just 0xFF -- last setting
 
     sunB <- isSunOut
     return . setLevelsOnEvt $ whenE (not <$> sunB) newLevelEvt
@@ -114,14 +114,16 @@ dimmerCfg home ins outs toLevel = do
     outDevs <- mapM (flip getDeviceById home) outs
 
     let setLevelsOnEvt :: Event Integer -> ZWave' (Event (IO ()))
-        setLevelsOnEvt byteE = List.foldl (unionWith (>>)) never <$> sequence
-            (   outDevs
-            <&> (   getDeviceValueByName "Level"
-                >=> flip setValueByteOnEvt byteE
-                )
-            )
+        setLevelsOnEvt byteE =
+            List.foldl (unionWith (>>)) never
+                <$> (   sequence
+                    $   outDevs
+                    <&> (   getDeviceValueByName "Level"
+                        >=> flip setValueByteOnEvt byteE
+                        )
+                    )
 
-        events :: ZWave' [Event Integer]
+        events :: ZWave' [(Event Integer)]
         events =
             sequence
                 $   inDevs
@@ -141,7 +143,8 @@ globalCfg home ds = dimmerCfg home ds ds toLevel
     toLevel _          = Nothing
 
 multiDimmerCfg :: ZWaveHome -> [DeviceId] -> ZWave Moment (Event (IO ()))
-multiDimmerCfg home ds = dimmerCfg home ds ds $ toLevel >>> Just
+multiDimmerCfg home ds =
+    dimmerCfg home ds ds $ toLevel >>> Just
   where
     toLevel :: Scene -> Integer
     toLevel DoubleUp   = 0xFF
