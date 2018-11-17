@@ -151,8 +151,8 @@ getDeviceById deviceId ZWaveHome {..} = do
     changes =
       filterJust $ _zwhChanges <&> (Map.lookup deviceId >>> fmap _deviceValues)
 
-  changes' <- distinct changes
-  return ZWaveDevice {_zwdInfo = info, _zwdChanges = changes'}
+  --changes' <- {- distinct-} changes --TODO
+  return ZWaveDevice {_zwdInfo = info, _zwdChanges = changes}
 
 app :: Monad m => m (a -> m b) -> a -> m b
 app mf a = mf >>= ($ a)
@@ -179,8 +179,8 @@ getDeviceValueByName name ZWaveDevice {..} = do
 
       changes = filterJust $ blookup <@> _zwdChanges
 
-  changes' <- distinct changes
-  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes'}
+  --changes' <- {- distinct -} changes --TODO
+  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes}
 
 distinct :: (MonadMoment m, Eq a) => Event a -> m (Event a)
 distinct = fmap (filterJust . fst) . mapAccum Nothing . fmap f
@@ -188,5 +188,10 @@ distinct = fmap (filterJust . fst) . mapAccum Nothing . fmap f
   f y (Just x) = if x == y then (Nothing, Just x) else (Just y, Just y)
   f y Nothing  = (Just y, Just y)
 
-valueChanges :: ZWaveValue -> Event ValueState
-valueChanges ZWaveValue {..} = _zwvChanges
+valueEvents :: ZWaveValue -> Event ValueState
+valueEvents ZWaveValue {..} = _zwvChanges
+
+-- TODO: remove once server/client arch has been updated to send events 
+--       rather than whole state snapshots
+valueChanges :: MonadMoment m => ZWaveValue -> m (Event ValueState)
+valueChanges = distinct . valueEvents

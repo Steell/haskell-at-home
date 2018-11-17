@@ -52,7 +52,7 @@ myconfig = do
         , multiDimmerCfg home livingroom
         , globalCfg home all
         -- , entranceCfg frontDoorSensor [livingroomEntry]
-	, return evts'
+        , return evts'
         ]
   where
     livingroom        = [livingroomEntry, livingroomMantle, livingroomSeating]
@@ -105,16 +105,14 @@ dimmerCfg home ins outs toLevel = do
     outDevs <- mapM (flip getDeviceById home) outs
 
     let setLevelsOnEvt :: Event Integer -> ZWave' (Event (IO ()))
-        setLevelsOnEvt byteE =
-            List.foldl (unionWith (>>)) never
-                <$> (   sequence
-                    $   outDevs
-                    <&> (   getDeviceValueByName "Level"
-                        >=> flip setValueByteOnEvt byteE
-                        )
-                    )
+        setLevelsOnEvt byteE = List.foldl (unionWith (>>)) never <$> sequence
+            (   outDevs
+            <&> (   getDeviceValueByName "Level"
+                >=> flip setValueByteOnEvt byteE
+                )
+            )
 
-        events :: ZWave' [(Event Integer)]
+        events :: ZWave' [Event Integer]
         events =
             sequence
                 $   inDevs
@@ -134,8 +132,7 @@ globalCfg home ds = dimmerCfg home ds ds toLevel
     toLevel _          = Nothing
 
 multiDimmerCfg :: ZWaveHome -> [DeviceId] -> ZWave Moment (Event (IO ()))
-multiDimmerCfg home ds =
-    dimmerCfg home ds ds $ toLevel >>> Just
+multiDimmerCfg home ds = dimmerCfg home ds ds $ toLevel >>> Just
   where
     toLevel :: Scene -> Integer
     toLevel DoubleUp   = 0xFF
@@ -145,25 +142,57 @@ multiDimmerCfg home ds =
 
 showHomeEventDiff :: MonadMoment m => Event DeviceMap -> m (Event String)
 showHomeEventDiff e = do
-  b <- stepper Map.empty e
-  let
-    diff :: DeviceMap
-         -> DeviceMap
-	 -> Map DeviceId (Change Device (Map ValueId (Change Value (ValueState, ValueState))))
-    diff a b = mergeMaps
-      (\Device{_deviceValues=a} Device{_deviceValues=b} -> mergeMaps
-        (\Value{_valueState=a} Value{_valueState=b} -> (a, b)) a b) a b
-    showDiff map =
-      List.unlines $ Map.toList map <&>
-        (\(d,c) -> showChange c (\map' -> List.unlines $ (Map.toList map') <&>
-	  (\(v,c') -> showChange c' (\(a,b) ->
-	     show d ++ ": " ++ show v ++ ": " ++ show a ++ " => " ++ show b))))
-    showChange c f = go c
-      where go (Added a) = "added"
-      	    go Deleted = "deleted"
-	    go (Changed b) = f b
+    b <- stepper Map.empty e
+    let diff
+            :: DeviceMap
+            -> DeviceMap
+            -> Map
+                   DeviceId
+                   ( Change
+                         Device
+                         ( Map
+                               ValueId
+                               (Change Value (ValueState, ValueState))
+                         )
+                   )
+        diff = mergeMaps
+            (\Device { _deviceValues = a } Device { _deviceValues = b } ->
+                mergeMaps
+                    (\Value { _valueState = a } Value { _valueState = b } ->
+                        (a, b)
+                    )
+                    a
+                    b
+            )
+        showDiff map =
+            List.unlines
+                $   Map.toList map
+                <&> (\(d, c) -> showChange
+                        c
+                        (\map' ->
+                            List.unlines
+                                $   Map.toList map'
+                                <&> (\(v, c') -> showChange
+                                        c'
+                                        (\(a, b) ->
+                                            show d
+                                                ++ ": "
+                                                ++ show v
+                                                ++ ": "
+                                                ++ show a
+                                                ++ " => "
+                                                ++ show b
+                                        )
+                                    )
+                        )
+                    )
+        showChange c f = go c
+          where
+            go (Added a)   = "added"
+            go Deleted     = "deleted"
+            go (Changed b) = f b
 
-  return $ (\a -> showDiff . diff a) <$> b <@> e
+    return $ (\a -> showDiff . diff a) <$> b <@> e
 
 mergeE :: (b -> b -> b) -> [Event b] -> Event b
 mergeE f = List.foldl' (unionWith f) never
@@ -171,7 +200,7 @@ mergeE f = List.foldl' (unionWith f) never
 getDoorEvent :: ZWaveDevice -> ZWave' (Event DoorState)
 getDoorEvent d =
     getDeviceValueByName "Access Control" d
-        <&> (   valueChanges
+        <&> (   valueEvents
             >>> fmap (preview _VByte)
             >>> filterJust
             >>> fmap lookup
@@ -185,7 +214,7 @@ getDoorEvent d =
 getSceneEvent :: ZWaveDevice -> ZWave' (Event Scene)
 getSceneEvent d =
     getDeviceValueByName "Scene Number" d
-        <&> (   valueChanges
+        <&> (   valueEvents
             >>> fmap (preview _VByte)
             >>> filterJust
             >>> fmap (flip Map.lookup sceneNumberMap)
