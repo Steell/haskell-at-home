@@ -41,13 +41,11 @@ main = do
     phoneNumbers <- getArgs --TODO: make nicer
     runClient cenv $ myconfig phoneNumbers
 
-type ZWave' = ZWave Moment
-
 data DoorState = Open | Closed
 
 myconfig :: [String] -> ZWave' (Event (IO ()))
 myconfig phoneNumbers = do
-    home         <- getHomeById 4171812579
+    home <- getHomeById 4171812579 "Melrose"
     let addrs = fmap
             (SMTP.Address Nothing . Text.pack . (<> "@msg.fi.google.com"))
             phoneNumbers
@@ -61,22 +59,20 @@ myconfig phoneNumbers = do
         , washerCfg addrs home washerOutlet
         ]
   where
-    livingroom        = [livingroomEntry, livingroomMantle, livingroomSeating]
-    livingroomEntry   = 3
-    livingroomMantle  = 4
-    livingroomSeating = 5
-    guestroom         = 2
-    bedroom           = [bedroomFront, bedroomKellie, bedroomSteve]
-    bedroomFront      = 6
-    bedroomKellie     = 7
-    bedroomSteve      = 8
-    diningroom        = 9
-    all               = [3 .. 9]
-    washerOutlet      = 10
-    frontDoorSensor   = 11
-    basementStairs    = 12
-    basementSeating   = 13
-    basementConsole   = 14
+    livingroom =
+        ("living room", [livingroomEntry, livingroomMantle, livingroomSeating])
+    livingroomEntry   = ("stairs", 3)
+    livingroomMantle  = ("fireplace", 4)
+    livingroomSeating = ("couch", 5)
+    guestroom         = ("guest bedroom / office", [("all", 2)])
+    bedroom = ("master bedroom", [bedroomFront, bedroomKellie, bedroomSteve])
+    bedroomFront      = ("dresser", 6)
+    bedroomKellie     = ("bedside left", 7)
+    bedroomSteve      = ("bedside right", 8)
+    diningroom        = ("dining room", [("all", 9)])
+    all               = [livingroom, bedroom, diningroom]  -- [3 .. 9]
+    -- washerOutlet      = ("washing machine", 10)
+    -- frontDoorSensor   = ("front door", 11)
 
 {-
 entranceCfg :: DeviceId -> [DeviceId] -> ZWave Moment (Event (IO ()))
@@ -113,17 +109,15 @@ dimmerCfg home ins outs toLevel = do
     inDevs  <- mapM (flip getDeviceById home) ins
     outDevs <- mapM (flip getDeviceById home) outs
 
-    let setLevelsOnEvt :: Event Integer -> ZWave' (Event (IO ()))
-        setLevelsOnEvt byteE =
-            List.foldl (unionWith (>>)) never
-                <$> (   sequence
-                    $   outDevs
-                    <&> (   getDeviceValueByName "Level"
-                        >=> flip setValueByteOnEvt byteE
-                        )
-                    )
+    let setLevelsOnEvt :: Event Integer -> ZWave Moment (Event (IO ()))
+        setLevelsOnEvt byteE = List.foldl (unionWith (>>)) never <$> sequence
+            (   outDevs
+            <&> (   getDeviceValueByName "Level"
+                >=> flip setValueByteOnEvt byteE
+                )
+            )
 
-        events :: ZWave' [(Event Integer)]
+        events :: ZWave Moment [Event Integer]
         events =
             sequence
                 $   inDevs
@@ -143,8 +137,7 @@ globalCfg home ds = dimmerCfg home ds ds toLevel
     toLevel _          = Nothing
 
 multiDimmerCfg :: ZWaveHome -> [DeviceId] -> ZWave Moment (Event (IO ()))
-multiDimmerCfg home ds =
-    dimmerCfg home ds ds $ toLevel >>> Just
+multiDimmerCfg home ds = dimmerCfg home ds ds $ toLevel >>> Just
   where
     toLevel :: Scene -> Integer
     toLevel DoubleUp   = 0xFF
@@ -152,56 +145,10 @@ multiDimmerCfg home ds =
     toLevel TripleUp   = 0x63
     toLevel TripleDown = 0
 
-showHomeEventDiff :: MonadMoment m => Event DeviceMap -> m (Event String)
-showHomeEventDiff e = do
-    b <- stepper Map.empty e
-    let diff
-            :: DeviceMap
-            -> DeviceMap
-            -> Map
-                   DeviceId
-                   ( Change
-                         Device
-                         ( Map
-                               ValueId
-                               (Change Value (ValueState, ValueState))
-                         )
-                   )
-        diff = mergeMaps
-            (\Device { _deviceValues = a } Device { _deviceValues = b } ->
-                mergeMaps
-                    (\Value { _valueState = a } Value { _valueState = b } ->
-                        (a, b)
-                    )
-                    a
-                    b
-            )
-        showDiff map =
-            List.unlines
-                $   Map.toList map
-                <&> (\(d, c) -> show d ++ ": " ++ showChange
-                        c
-                        (\map' ->
-                            List.unlines
-                                $   Map.toList map'
-                                <&> (\(v, c') -> show v ++ ": " ++ showChange
-                                        c'
-                                        (\(a, b) -> show a ++ " => " ++ show b)
-                                    )
-                        )
-                    )
-        showChange c f = go c
-          where
-            go (Added a)   = "added"
-            go Deleted     = "deleted"
-            go (Changed b) = f b
-
-    return . fmap showDiff . filterE (not . Map.null) $ diff <$> b <@> e
-
 mergeE :: (b -> b -> b) -> [Event b] -> Event b
 mergeE f = List.foldl' (unionWith f) never
 
-getDoorEvent :: ZWaveDevice -> ZWave' (Event DoorState)
+getDoorEvent :: ZWaveDevice -> ZWave Moment (Event DoorState)
 getDoorEvent d =
     getDeviceValueByName "Access Control" d
         <&> (   valueChanges
@@ -215,7 +162,7 @@ getDoorEvent d =
     lookup 23 = Just Closed
     lookup _  = Nothing
 
-getSceneEvent :: ZWaveDevice -> ZWave' (Event Scene)
+getSceneEvent :: ZWaveDevice -> ZWave Moment (Event Scene)
 getSceneEvent d =
     getDeviceValueByName "Scene Number" d
         <&> (   valueChanges
