@@ -15,8 +15,8 @@ import           Control.Concurrent.STM.TChan   ( newBroadcastTChanIO
 
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
+import qualified Data.Text                     as Text
 
--- TODO: this is gross, don't overload alias
 import qualified OpenZWave.Ozw                 as OZW
 
 import qualified ReactiveDaemon.OpenZWave      as Z
@@ -44,10 +44,8 @@ main = do
 
     hookZWaveNotifications :: ServerEnv -> IO ()
     hookZWaveNotifications ServerEnv {..} = do
-        unregister <- Z.registerNotificationEvent _manager $ \notification -> do
-            -- putStrLn $ "notif: " ++ show notification
-            -- map <-
-              atomically $ do
+        unregister <- Z.registerNotificationEvent _manager $ \notification ->
+            atomically $ do
                 state <- readTVar _state
                 let state'@ZWaveState {..} = updateState notification state
                 writeTVar _state state'
@@ -61,18 +59,22 @@ main = do
     updateState n s@ZWaveState {..} = go n
       where
         go (Z.DriverReady hid) =
-              let
-                  homeId   = toInteger hid
-                  home     = Home homeId Map.empty
-              in
-                  s { _homeMap = Map.insert homeId home _homeMap }
+            let homeId = toInteger hid
+                home   = Home homeId Map.empty
+            in  s { _homeMap = Map.insert homeId home _homeMap }
 
         go (Z.NodeAdded Z.NodeInfo {..}) =
             let
                 deviceId = toInteger _nodeId
                 homeId   = toInteger _nodeHome
                 device@Device {..} =
-                    Device {_deviceId = deviceId, _deviceValues = Map.empty}
+                    Device { _deviceId = deviceId
+                           , _deviceName = _nodeName
+                           , _deviceManufacturer = _nodeManufacturer
+                           , _deviceProductName = _nodeProductName
+                           , _deviceProductType = _nodeProductType
+                           , _deviceValues = Map.empty
+                           }
             in
                 s
                     { _homeMap =
@@ -110,7 +112,7 @@ main = do
                   value@Value {..} = Value
                       { _valueId    = valueId
                       , _valueState = convertZWaveValue vData
-                      , _valueName = _vInfoName
+                      , _valueName  = _vInfoName
                       }
               in
                   s

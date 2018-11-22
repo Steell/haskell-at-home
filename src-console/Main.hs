@@ -87,10 +87,19 @@ listDevices homeId = do
         .   withZWaveClient env
         $   liftIO
         .   print
+        .   fmap unlines
         =<< fmap extractDeviceList zGetSnapshot
   where
-    extractDeviceList :: HomeMap -> Maybe [Device]
-    extractDeviceList = Map.elems . _homeDevices <$< Map.lookup homeId
+    extractDeviceList :: HomeMap -> Maybe [String]
+    extractDeviceList = fmap showDevice . Map.elems . _homeDevices <$< Map.lookup homeId
+
+    showDevice :: Device -> String
+    showDevice Device {_deviceId=did, _deviceName=dName, _deviceManufacturer=dMan, _deviceProductName=dpName, _deviceProductType=dpType} =
+        "{ id=" <> show did 
+          <> ", name=" <> show dName 
+          <> ", manufacturer=" <> show dMan
+          <> ", product=" <> show dpName
+          <> ", type=" <> show dpType
 
 listValues :: MonadAction m => HomeId -> DeviceId -> m ()
 listValues homeId deviceId = do

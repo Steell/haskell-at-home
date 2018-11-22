@@ -6,6 +6,8 @@ import           Control.Applicative
 import           Control.Monad
 -- import Data.Time.Clock.System
 -- import Data.Time.Format
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as Text
 import           Data.Word
 import           Foreign.C.Types         hiding ( CBool )
 import           Foreign.Hoppy.Runtime
@@ -28,7 +30,10 @@ type ValueId = CULLong
 
 data NodeInfo = NodeInfo { _nodeHome :: !HomeId
                          , _nodeId :: !NodeId
-                         , _nodeName :: !String
+                         , _nodeName :: !Text
+                         , _nodeManufacturer :: !Text
+                         , _nodeProductName :: !Text
+                         , _nodeProductType :: !Text
                          }
                 deriving (Show)
 -- makeLenses ''NodeInfo
@@ -95,10 +100,14 @@ registerNotificationEvent m = addHandler
             Z.NotificationType_DriverReady ->
                 DriverReady <$> Z.notification_GetHomeId n
             Z.NotificationType_NodeAdded -> do
-                hid  <- Z.notification_GetHomeId n
-                nid  <- Z.notification_GetNodeId n
-                name <- Z.manager_GetNodeName m hid nid
-                return . NodeAdded $ NodeInfo hid nid name
+                !hid  <- Z.notification_GetHomeId n
+                !nid  <- Z.notification_GetNodeId n
+                !name <- Text.pack <$> Z.manager_GetNodeName m hid nid
+                !manu <-
+                    Text.pack <$> Z.manager_GetNodeManufacturerName m hid nid
+                !prod  <- Text.pack <$> Z.manager_GetNodeProductName m hid nid
+                !pType <- Text.pack <$> Z.manager_GetNodeProductType m hid nid
+                return . NodeAdded $ NodeInfo hid nid name manu prod pType
             Z.NotificationType_NodeRemoved ->
                 NodeRemoved
                     <$> Z.notification_GetHomeId n
@@ -114,18 +123,17 @@ registerNotificationEvent m = addHandler
                     <*> Z.valueID_GetNodeId valueId
                     <*> Z.valueID_GetId valueId
             Z.NotificationType_ValueChanged -> do
-                v     <- Z.notification_GetValueID n
-                name  <- Z.manager_GetValueLabel m v
-                data' <- convertValue m v
-                nid   <- Z.valueID_GetNodeId v
-                vid   <- Z.valueID_GetId v
-                hid   <- Z.notification_GetHomeId n
+                !v     <- Z.notification_GetValueID n
+                !name  <- Z.manager_GetValueLabel m v
+                !data' <- convertValue m v
+                !nid   <- Z.valueID_GetNodeId v
+                !vid   <- Z.valueID_GetId v
+                !hid   <- Z.notification_GetHomeId n
+                -- TODO: Printing here forces these thunks to be evaluated.
+                --       When this is removed, shit breaks...
+                --       Test again without bang patters in the do above do block
                 putStrLn $ "  " ++ show (hid, nid, vid, name, data')
-                ValueChanged
-                    <$> pure hid
-                    <*> pure nid
-                    <*> Z.valueID_GetId v
-                    <*> pure data'
+                return $ ValueChanged hid nid vid data'
             Z.NotificationType_AwakeNodesQueried -> return AwakeNodesQueried
             Z.NotificationType_AllNodesQueried -> return AllNodesQueried
             t -> return $ Unsupported t
@@ -157,15 +165,15 @@ setValue m (ZVID !hid !vid) d = do
     --name <- Z.manager_GetValueLabel m v
     -- t <- Z.valueID_GetType v
     --putStrLn $ " " ++ show (name, vid, t) ++ " <- " ++ show d
-    case d of 
-        (VTByte    b ) -> Z.manager_setByteValue m v b
-        (VTBool    b ) -> Z.manager_setBoolValue m v b
+    case d of
+        (VTByte   b) -> Z.manager_setByteValue m v b
+        (VTBool   b) -> Z.manager_setBoolValue m v b
         -- (VTDecimal d ) -> error "todo: implement setValue for decimal"
-        (VTInt     i ) -> Z.manager_setIntValue m v i
+        (VTInt    i) -> Z.manager_setIntValue m v i
         -- (VTList idx _) -> Z.manager_SetValueListSelection m v idx
-        (VTShort  s  ) -> Z.manager_setShortValue m v s
-        (VTString s  ) -> Z.manager_SetStringValue m v s
-        _              -> error "todo: implement setValue"
+        (VTShort  s) -> Z.manager_setShortValue m v s
+        (VTString s) -> Z.manager_SetStringValue m v s
+        _            -> error "todo: implement setValue"
 
 setValueFromString :: Z.Manager -> ZVID -> String -> IO Bool
 setValueFromString m (ZVID !hid !vid) d = do

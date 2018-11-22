@@ -100,6 +100,10 @@ instance JSON.FromJSON Value
 type ValueMap = Map ValueId Value
 
 data Device = Device { _deviceId :: DeviceId
+                     , _deviceName :: Text
+                     , _deviceManufacturer :: Text
+                     , _deviceProductName :: Text
+                     , _deviceProductType :: Text
                      , _deviceValues :: ValueMap
                      }
   deriving (Eq, Show, Generic)
