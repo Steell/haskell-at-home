@@ -12,8 +12,6 @@ module ReactiveDaemon where
 
 import           Api
 
-import           ClientApi
-
 import           Control.Arrow
 import           Control.Lens
 import           Control.Monad

@@ -13,7 +13,7 @@ module Server
   )
 where
 
-import           Api
+import           Api                     hiding ( getValue )
 
 import           Conduit
 
@@ -32,7 +32,6 @@ import qualified Data.Map.Strict               as Map
 import           Data.Typeable                  ( Proxy(..) )
 
 import           Network.Wai
-import           Network.Wai.Handler.Warp
 
 -- TODO: this is gross, don't overload alias
 import qualified OpenZWave.Ozw                 as Z
@@ -63,11 +62,24 @@ serverApp env = serve serverApi
   where toHandler = flip runReaderT
 
 server :: ServerEnv -> ServerT API AppM
-server env = stateBroadcast env :<|> values
-  where values hid did vid = postValue hid did vid :<|> getValue hid did vid
+server env = stateBroadcast env :<|> values :<|> snapshot
+ where
+  values hid did vid =
+    postValueString hid did vid
+      :<|> postValue hid did vid
+      :<|> getValue hid did vid
+
+postValueString :: HomeId -> DeviceId -> ValueId -> String -> AppM ()
+postValueString hid _ vid newVal = do
+  ServerEnv {..} <- ask
+  success        <- liftIO $ Z.setValueFromString
+    _manager
+    (Z.ZVID (fromInteger hid) (fromInteger vid))
+    newVal
+  unless success $ throwError err404
 
 postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
-postValue hid did vid newVal = do
+postValue hid _ vid newVal = do
   ServerEnv {..} <- ask
   success <- liftIO $ Z.setValue _manager
                                  (Z.ZVID (fromInteger hid) (fromInteger vid))
@@ -76,8 +88,7 @@ postValue hid did vid newVal = do
 
 getValue :: HomeId -> DeviceId -> ValueId -> AppM Value
 getValue hid did vid = do
-  ServerEnv {..} <- ask
-  homeMap        <- fmap _homeMap . liftIO . atomically $ TVar.readTVar _state
+  homeMap <- snapshot
   let mValue =
         Map.lookup vid
           .   _deviceValues
@@ -103,3 +114,8 @@ stateBroadcast ServerEnv {..} = do
     hmap <- liftIO . atomically $ TChan.readTChan chan
     yield hmap
     go chan
+
+snapshot :: AppM HomeMap
+snapshot = do
+  ServerEnv {..} <- ask
+  fmap _homeMap . liftIO . atomically $ TVar.readTVar _state

@@ -100,7 +100,7 @@ registerNotificationEvent m = addHandler
                 name <- Z.manager_GetNodeName m hid nid
                 return . NodeAdded $ NodeInfo hid nid name
             Z.NotificationType_NodeRemoved ->
-                NodeRemoved 
+                NodeRemoved
                     <$> Z.notification_GetHomeId n
                     <*> Z.notification_GetNodeId n
             Z.NotificationType_ValueAdded -> do
@@ -119,12 +119,12 @@ registerNotificationEvent m = addHandler
                 data' <- convertValue m v
                 nid   <- Z.valueID_GetNodeId v
                 vid   <- Z.valueID_GetId v
-		hid   <- Z.notification_GetHomeId n
+                hid   <- Z.notification_GetHomeId n
                 putStrLn $ "  " ++ show (hid, nid, vid, name, data')
                 ValueChanged
-                    <$> pure hid 
-                    <*> pure nid 
-                    <*> Z.valueID_GetId v 
+                    <$> pure hid
+                    <*> pure nid
+                    <*> Z.valueID_GetId v
                     <*> pure data'
             Z.NotificationType_AwakeNodesQueried -> return AwakeNodesQueried
             Z.NotificationType_AllNodesQueried -> return AllNodesQueried
@@ -152,13 +152,25 @@ initOzw ZWaveOptions {..} = do
     return zwManager
 
 setValue :: Z.Manager -> ZVID -> ValueData -> IO Bool
-setValue m (ZVID !hid !vid) d@(VTByte b) = do
+setValue m (ZVID !hid !vid) d = do
     v <- toGc =<< Z.valueID_unpack hid vid
     --name <- Z.manager_GetValueLabel m v
     -- t <- Z.valueID_GetType v
     --putStrLn $ " " ++ show (name, vid, t) ++ " <- " ++ show d
-    Z.manager_setByteValue m v b
-setValue _ _ _ = error "implement"
+    case d of 
+        (VTByte    b ) -> Z.manager_setByteValue m v b
+        (VTBool    b ) -> Z.manager_setBoolValue m v b
+        -- (VTDecimal d ) -> error "todo: implement setValue for decimal"
+        (VTInt     i ) -> Z.manager_setIntValue m v i
+        -- (VTList idx _) -> Z.manager_SetValueListSelection m v idx
+        (VTShort  s  ) -> Z.manager_setShortValue m v s
+        (VTString s  ) -> Z.manager_SetStringValue m v s
+        _              -> error "todo: implement setValue"
+
+setValueFromString :: Z.Manager -> ZVID -> String -> IO Bool
+setValueFromString m (ZVID !hid !vid) d = do
+    v <- toGc =<< Z.valueID_unpack hid vid
+    Z.manager_SetStringValue m v d
 
 convertValue :: Z.Manager -> Z.ValueIDConst -> IO ValueData
 convertValue mgr = go

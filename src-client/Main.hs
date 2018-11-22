@@ -2,7 +2,7 @@
 
 module Main where
 
-import           Api
+import           Api hiding (getValue)
 
 import           Client2
 

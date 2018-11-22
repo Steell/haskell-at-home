@@ -9,7 +9,6 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -17,7 +16,6 @@ module Api where
 
 import           Conduit
 
-import           Control.Applicative
 import           Control.Concurrent.Async
 import           Control.Concurrent.MVar
 import           Control.Monad.Reader
@@ -30,6 +28,7 @@ import           Data.ByteString.Lazy.Char8     ( unpack )
 import qualified Data.Conduit.List             as CL
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
+import           Data.Proxy
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as Text
 import           Data.Word
@@ -62,7 +61,7 @@ data ValueState = VBool Bool
                 | VString Text
                 | VButton
                 | VRaw
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Read, Generic)
 
 instance JSON.ToJSON ValueState
 instance JSON.FromJSON ValueState
@@ -116,13 +115,25 @@ instance JSON.ToJSON Home
 instance JSON.FromJSON Home
 type HomeMap = Map HomeId Home
 
+{-
+data ZEvent = Init HomeMap
+            | Event Z.Notification
+  deriving (Show, Generic)
+
+instance JSON.ToJSON ZEvent
+instance JSON.FromJSON ZEvent
+-}
+
 type API =
   "state" :> WebSocketConduit () HomeMap
+  -- "events" :> WebSocketConduit () ZEvent --TODO
   :<|> Capture "home" HomeId
     :> Capture "device" DeviceId
     :> Capture "value" ValueId
-    :> (ReqBody '[JSON] ValueState :> Post '[JSON] ()
+    :> (ReqBody '[JSON] String :> Post '[JSON] ()
+      :<|> ReqBody '[JSON] ValueState :> Post '[JSON] ()
       :<|> Get '[JSON] Value)
+  :<|> "snapshot" :> Get '[JSON] HomeMap
 
 --TODO: improve nested API
 --  https://haskell-servant.readthedocs.io/en/stable/tutorial/Server.html#nested-apis
@@ -168,6 +179,62 @@ instance (RunWebSocketClient m, JSON.FromJSON o, JSON.ToJSON i) =>
     clientWithRoute _ _ req client = webSocketRequest client req
     hoistClientMonad _ _ f client c = f (client c)
 
+clientIO :: ClientEnv -> Client IO API
+clientIO cenv = hoistClient api runClientIO (client api)
+ where
+  runClientIO :: ClientM a -> IO a
+  runClientIO = fmap (either (error . show) id) . flip runClientM cenv
+  api :: Proxy API
+  api = Proxy
+
+handleState :: Monad m => Client m API -> ConduitClient HomeMap () -> m ()
+handleState (f :<|> _ :<|> _) = f
+
+getSnapshot :: Monad m => Client m API -> m HomeMap
+getSnapshot (_ :<|> _ :<|> f) = f
+
+setValueString
+  :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
+setValueString (_ :<|> valueApi :<|> _) h d v = fst $ valueApi h d v
+  where fst (f :<|> _) = f
+
+setValue
+  :: Monad m
+  => Client m API
+  -> HomeId
+  -> DeviceId
+  -> ValueId
+  -> ValueState
+  -> m ()
+setValue (_ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
+  where snd (_ :<|> f :<|> _) = f
+
+getValue :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> m Value
+getValue (_ :<|> valueApi :<|> _) h d v = third $ valueApi h d v
+  where third (_ :<|> _ :<|> f) = f
+
+
+--- Attempt at making this a monad
+
+newtype ClientT m a = ClientT { unClientT :: ReaderT (Client m API) m a }
+  deriving (Functor, Applicative, Monad, MonadIO)
+
+class Monad m => MonadZWave m where
+  zHandleState :: ConduitClient HomeMap () -> m ()
+  zSetValueString :: HomeId -> DeviceId -> ValueId -> String -> m ()
+  zSetValue :: HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+  zGetValue :: HomeId -> DeviceId -> ValueId -> m Value
+  zGetSnapshot :: m HomeMap
+
+instance Monad m => MonadZWave (ClientT m) where
+  zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
+  zSetValueString h d v s = ClientT . ReaderT $ \c -> setValueString c h d v s
+  zGetValue h d v = ClientT . ReaderT $ \c -> getValue c h d v
+  zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s
+  zGetSnapshot = ClientT $ ReaderT getSnapshot
+
+withZWaveClient :: ClientEnv -> ClientT IO a -> IO a
+withZWaveClient env c = flip runReaderT (clientIO env) $ unClientT c
 
 ----- ARCHIVED -----
 {- 
