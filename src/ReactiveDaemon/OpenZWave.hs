@@ -40,7 +40,7 @@ data NodeInfo = NodeInfo { _nodeHome :: !HomeId
 
 data ValueData = VTBool !Bool
                | VTByte !CUChar
-               | VTDecimal !String
+               | VTDecimal !Float
                | VTInt !Int
                | VTList !Int ![(Int, String)]
                | VTSchedule
@@ -197,9 +197,8 @@ convertValue mgr = go
                     "value reported as byte but could not be converted"
                 w <- decode p
                 return $ VTByte w
-            Z.ValueType_Decimal -> do
-                p <- toGc =<< stdString_new
-                b <- Z.manager_GetValueAsString mgr v p
+            Z.ValueType_Decimal -> alloca $ \p -> do
+                b <- Z.manager_GetValueAsFloat mgr v p
                 unless b $ fail
                     "value reported as decimal but could not be converted"
                 VTDecimal <$> decode p

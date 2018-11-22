@@ -73,6 +73,7 @@ executable smarthome-reactive-client
                      , servant
                      , servant-client
                      , servant-client-core
+                     , smtp-mail
                      , stm
                      , text
                      , websockets

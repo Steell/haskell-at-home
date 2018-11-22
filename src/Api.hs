@@ -53,7 +53,7 @@ type ValueId = Integer
 -- TODO: preserve types and do convertion to/from in to/from JSON
 data ValueState = VBool Bool
                 | VByte Integer
-                | VDecimal Text
+                | VDecimal Float
                 | VInt Int
                 | VList Int [(Int, String)]
                 | VSchedule
@@ -69,7 +69,7 @@ instance JSON.FromJSON ValueState
 convertZWaveValue :: Z.ValueData -> ValueState
 convertZWaveValue (Z.VTBool    b) = VBool b
 convertZWaveValue (Z.VTByte    c) = VByte $ toInteger c
-convertZWaveValue (Z.VTDecimal s) = VDecimal $ Text.pack s
+convertZWaveValue (Z.VTDecimal f) = VDecimal f
 convertZWaveValue (Z.VTInt     i) = VInt i
 convertZWaveValue (Z.VTList i l ) = VList i l
 convertZWaveValue Z.VTSchedule    = VSchedule
@@ -81,7 +81,7 @@ convertZWaveValue Z.VTRaw         = VRaw
 convertToZWaveValue :: ValueState -> Z.ValueData
 convertToZWaveValue (VBool    b) = Z.VTBool b
 convertToZWaveValue (VByte    i) = Z.VTByte $ fromInteger i
-convertToZWaveValue (VDecimal t) = Z.VTDecimal $ Text.unpack t
+convertToZWaveValue (VDecimal f) = Z.VTDecimal f
 convertToZWaveValue (VInt     i) = Z.VTInt i
 convertToZWaveValue (VList i l ) = Z.VTList i l
 convertToZWaveValue VSchedule    = Z.VTSchedule
