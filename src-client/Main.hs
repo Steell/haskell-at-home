@@ -264,7 +264,7 @@ washerConfig addrs home d = do
     powerB <- stepper 0 powerE
 
     let reactToChange :: Float -> Float -> IO ()
-        reactToChange old new = when (old > 0 && new < 0.5) sendEmail
+        reactToChange old new = when (old > 0 && new < 0.5) $ sendEmail addrs
 
     return $ (powerB <&> reactToChange) <@> powerE
 
