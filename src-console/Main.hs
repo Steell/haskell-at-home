@@ -89,8 +89,8 @@ listDevices homeId = do
         .   print
         =<< fmap extractDeviceList zGetSnapshot
   where
-    extractDeviceList :: HomeMap -> Maybe [DeviceId]
-    extractDeviceList = Map.keys . _homeDevices <$< Map.lookup homeId
+    extractDeviceList :: HomeMap -> Maybe [Device]
+    extractDeviceList = Map.elems . _homeDevices <$< Map.lookup homeId
 
 listValues :: MonadAction m => HomeId -> DeviceId -> m ()
 listValues homeId deviceId = do
