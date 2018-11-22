@@ -38,18 +38,18 @@ main :: IO ()
 main = do
     mgr <- newManager defaultManagerSettings
     let cenv = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
-    runClient cenv myconfig
+    phoneNumbers <- getArgs --TODO: make nicer
+    runClient cenv $ myconfig phoneNumbers
 
 type ZWave' = ZWave Moment
 
 data DoorState = Open | Closed
 
-myconfig :: ZWave' (Event (IO ()))
-myconfig = do
-    home <- getHomeById 4171812579
-    phoneNumbers <- getArgs --TODO: make nicer
+myconfig :: [String] -> ZWave' (Event (IO ()))
+myconfig phoneNumbers = do
+    home         <- getHomeById 4171812579
 
-    strs <- showHomeEventDiff $ _zwhChanges home
+    strs         <- showHomeEventDiff $ _zwhChanges home
     let evts' = putStrLn <$> strs
 
     let addrs = fmap
@@ -256,8 +256,9 @@ singleDimmerCfg home d = do
 
     liftM ff a = ($ a) =<< ff
 
-washerConfig :: [SMTP.Address] -> ZWaveHome -> DeviceId -> ZWave Moment (Event (IO ()))
-washerConfig addrs home d = do
+washerCfg
+    :: [SMTP.Address] -> ZWaveHome -> DeviceId -> ZWave Moment (Event (IO ()))
+washerCfg addrs home d = do
     device <- getDeviceById d home
     powerV <- getDeviceValueByName "Power" device
     powerE <- fmap (^?! _VDecimal) <$> valueChanges powerV
