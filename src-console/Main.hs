@@ -15,13 +15,9 @@ import           Api                     hiding ( getValue
 import           Control.Monad.Reader
 import           Control.Monad.IO.Class         ( MonadIO )
 
-import           Data.Aeson                     ( FromJSON
-                                                , decode
-                                                )
-import qualified Data.ByteString.Lazy          as BL
 import qualified Data.Map                      as Map
-import           Data.Maybe                     ( fromJust )
-import           Data.Text.Encoding             ( encodeUtf8 )
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as Text
 
 import           Network.HTTP.Client            ( newManager
                                                 , defaultManagerSettings
@@ -43,7 +39,7 @@ instance ParseRecord Command
 main :: IO ()
 main = do
     command <- getRecord "ZWave Controller"
-    mgr <- newManager defaultManagerSettings
+    mgr     <- newManager defaultManagerSettings
     let env    = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
         action = case command of
             ListHomes                       -> listHomes
@@ -53,7 +49,7 @@ main = do
             GetValue { homeId, deviceId, valueId } ->
                 getValue homeId deviceId valueId
             SetValue { homeId, deviceId, valueId, value } ->
-                setValue homeId deviceId valueId (fromJust $ decodeText value)
+                setValue homeId deviceId valueId value
     runReaderT action env
 
 infixl 4 <&>
@@ -63,9 +59,6 @@ infixl 4 <&>
 infixl 4 <$<
 (<$<) :: Functor f => (b -> c) -> (a -> f b) -> a -> f c
 g <$< f = fmap g . f
-
-decodeText :: FromJSON a => Text -> Maybe a
-decodeText = decode . BL.fromStrict . encodeUtf8
 
 type MonadAction m = (MonadReader ClientEnv m, MonadIO m)
 
@@ -91,15 +84,21 @@ listDevices homeId = do
         =<< fmap extractDeviceList zGetSnapshot
   where
     extractDeviceList :: HomeMap -> Maybe [String]
-    extractDeviceList = fmap showDevice . Map.elems . _homeDevices <$< Map.lookup homeId
+    extractDeviceList =
+        fmap showDevice . Map.elems . _homeDevices <$< Map.lookup homeId
 
     showDevice :: Device -> String
-    showDevice Device {_deviceId=did, _deviceName=dName, _deviceManufacturer=dMan, _deviceProductName=dpName, _deviceProductType=dpType} =
-        "{ id=" <> show did 
-          <> ", name=" <> show dName 
-          <> ", manufacturer=" <> show dMan
-          <> ", product=" <> show dpName
-          <> ", type=" <> show dpType
+    showDevice Device { _deviceId = did, _deviceName = dName, _deviceManufacturer = dMan, _deviceProductName = dpName, _deviceProductType = dpType }
+        = "{ id="
+            <> show did
+            <> ", name="
+            <> show dName
+            <> ", manufacturer="
+            <> show dMan
+            <> ", product="
+            <> show dpName
+            <> ", type="
+            <> show dpType
 
 listValues :: MonadAction m => HomeId -> DeviceId -> m ()
 listValues homeId deviceId = do
@@ -126,17 +125,13 @@ getValue homeId deviceId valueId = do
         =<< fmap extractValue zGetSnapshot
   where
     extractValue =
-        _valueState
-            <$< Map.lookup valueId
-            .   _deviceValues
-            <$< Map.lookup deviceId
-            .   _homeDevices
-            <$< Map.lookup homeId
+        (_valueState <$< Map.lookup valueId)
+            <=< (_deviceValues <$< Map.lookup deviceId)
+            <=< (_homeDevices <$< Map.lookup homeId)
 
-setValue
-    :: (MonadAction m) => HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+setValue :: (MonadAction m) => HomeId -> DeviceId -> ValueId -> Text -> m ()
 setValue homeId deviceId valueId value = do
     env <- ask
     liftIO . withZWaveClient env $ do
-        zSetValue homeId deviceId valueId value
+        zSetValueString homeId deviceId valueId (Text.unpack value)
         liftIO $ putStrLn "OK!"
