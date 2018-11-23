@@ -8,50 +8,25 @@ module Client2
 where
 
 import           Api                            ( ConduitClient
-                                                , API
-                                                , Device(..)
-                                                , DeviceId
-                                                , Home(..)
-                                                , HomeId
-                                                , HomeMap
-                                                , Value(..)
-                                                , ValueId
-                                                , ValueState
                                                 , clientIO
                                                 , handleState
                                                 , handleEvents
                                                 )
 
-import           Conduit                        ( await
-                                                , (.|)
-                                                )
 
-import           Control.Concurrent.Async       ( async, race_ )
+import           Control.Concurrent.Async       ( race_ )
 import           Control.Monad                  ( void )
-import           Control.Monad.Reader           ( MonadReader
-                                                , ReaderT
-                                                , asks
-                                                )
 
-import           Data.Conduit                   ( ConduitT )
 import qualified Data.Conduit.Combinators      as Conduit
 import qualified Data.Map.Merge.Strict         as Map
 import           Data.Map.Strict                ( Map )
-import qualified Data.Map.Strict               as Map
-import           Data.Typeable                  ( Proxy(..) )
 
 import           Reactive.Banana
 import           Reactive.Banana.Frameworks
 
 import           ReactiveDaemon
 
-import           Servant.Client                 ( Client
-                                                , ClientM
-                                                , ClientEnv
-                                                , client
-                                                , hoistClient
-                                                , runClientM
-                                                )
+import           Servant.Client                 ( ClientEnv )
 
 runClient :: ClientEnv -> ZWave Moment (Event (IO ())) -> IO ()
 runClient cenv cfg = do
@@ -60,12 +35,11 @@ runClient cenv cfg = do
     let client  = clientIO cenv
         netDesc = dNetwork client cfg stateHandler eventHandler
     compile netDesc >>= actuate
-    race_  (async $ thread (handleState client) writeState) 
-           (async $ thread (handleEvents client) writeEvent)
+    race_ (thread (handleState client) writeState)
+          (thread (handleEvents client) writeEvent)
   where
     thread :: (ConduitClient a () -> IO ()) -> (a -> IO ()) -> IO ()
-    thread connect write =
-      void . connect $ do
+    thread connect write = void . connect $ do
         liftIO $ putStrLn "Connected to socket."
         Conduit.mapM_ (liftIO . write)
 
