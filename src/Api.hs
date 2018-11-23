@@ -119,25 +119,28 @@ instance JSON.ToJSON Home
 instance JSON.FromJSON Home
 type HomeMap = Map HomeId Home
 
-{-
+
 data ZEvent = Init HomeMap
-            | Event Z.Notification
+            | HomeAdded Home
+            | DeviceAdded HomeId Device
+            | DeviceRemoved HomeId DeviceId
+            | ValueAdded HomeId DeviceId Value
+            | ValueRemoved HomeId DeviceId ValueId
+            | ValueChanged HomeId DeviceId ValueId ValueState
   deriving (Show, Generic)
 
 instance JSON.ToJSON ZEvent
 instance JSON.FromJSON ZEvent
--}
 
-type API =
-  "state" :> WebSocketConduit () HomeMap
-  -- "events" :> WebSocketConduit () ZEvent --TODO
-  :<|> Capture "home" HomeId
-    :> Capture "device" DeviceId
-    :> Capture "value" ValueId
-    :> (ReqBody '[JSON] String :> Post '[JSON] ()
-      :<|> ReqBody '[JSON] ValueState :> Post '[JSON] ()
-      :<|> Get '[JSON] Value)
-  :<|> "snapshot" :> Get '[JSON] HomeMap
+type API =  "state"  :> WebSocketConduit () HomeMap
+       :<|> "events" :> WebSocketConduit () ZEvent
+       :<|> Capture "home" HomeId
+         :> Capture "device" DeviceId
+         :> Capture "value" ValueId
+         :> (    ReqBody '[JSON] String     :> Post '[JSON] ()
+            :<|> ReqBody '[JSON] ValueState :> Post '[JSON] ()
+            :<|> Get '[JSON] Value)
+       :<|> "snapshot" :> Get '[JSON] HomeMap
 
 --TODO: improve nested API
 --  https://haskell-servant.readthedocs.io/en/stable/tutorial/Server.html#nested-apis
@@ -192,14 +195,17 @@ clientIO cenv = hoistClient api runClientIO (client api)
   api = Proxy
 
 handleState :: Monad m => Client m API -> ConduitClient HomeMap () -> m ()
-handleState (f :<|> _ :<|> _) = f
+handleState (f :<|> _) = f
+
+handleEvents :: Monad m => Client m API -> ConduitClient ZEvent () -> m ()
+handleEvents (_ :<|> f :<|> _) = f
 
 getSnapshot :: Monad m => Client m API -> m HomeMap
-getSnapshot (_ :<|> _ :<|> f) = f
+getSnapshot (_ :<|> _ :<|> _ :<|> f) = f
 
 setValueString
   :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
-setValueString (_ :<|> valueApi :<|> _) h d v = fst $ valueApi h d v
+setValueString (_ :<|> _ :<|> valueApi :<|> _) h d v = fst $ valueApi h d v
   where fst (f :<|> _) = f
 
 setValue
@@ -210,11 +216,11 @@ setValue
   -> ValueId
   -> ValueState
   -> m ()
-setValue (_ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
+setValue (_ :<|> _ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
   where snd (_ :<|> f :<|> _) = f
 
 getValue :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> m Value
-getValue (_ :<|> valueApi :<|> _) h d v = third $ valueApi h d v
+getValue (_ :<|> _ :<|> valueApi :<|> _) h d v = third $ valueApi h d v
   where third (_ :<|> _ :<|> f) = f
 
 
@@ -225,6 +231,7 @@ newtype ClientT m a = ClientT { unClientT :: ReaderT (Client m API) m a }
 
 class Monad m => MonadZWave m where
   zHandleState :: ConduitClient HomeMap () -> m ()
+  zHandleEvents :: ConduitClient ZEvent () -> m ()
   zSetValueString :: HomeId -> DeviceId -> ValueId -> String -> m ()
   zSetValue :: HomeId -> DeviceId -> ValueId -> ValueState -> m ()
   zGetValue :: HomeId -> DeviceId -> ValueId -> m Value
@@ -232,6 +239,7 @@ class Monad m => MonadZWave m where
 
 instance Monad m => MonadZWave (ClientT m) where
   zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
+  zHandleEvents cc = ClientT . ReaderT $ \c -> handleEvents c cc
   zSetValueString h d v s = ClientT . ReaderT $ \c -> setValueString c h d v s
   zGetValue h d v = ClientT . ReaderT $ \c -> getValue c h d v
   zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s

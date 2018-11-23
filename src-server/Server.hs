@@ -49,6 +49,7 @@ data ServerEnv =
   ServerEnv { _state :: TVar ZWaveState
             , _manager :: Z.Manager
             , _stateBroadcastChan :: TChan HomeMap
+            , _eventBroadcastChan :: TChan ZEvent
             }
 
 type AppM = ReaderT ServerEnv Handler
@@ -62,7 +63,7 @@ serverApp env = serve serverApi
   where toHandler = flip runReaderT
 
 server :: ServerEnv -> ServerT API AppM
-server env = stateBroadcast env :<|> values :<|> snapshot
+server env = stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot
  where
   values hid did vid =
     postValueString hid did vid
@@ -74,7 +75,8 @@ postValueString hid _ vid newVal = do
   ServerEnv {..} <- ask
   success        <- liftIO $ Z.setValueFromString
     _manager
-    (Z.ZVID (fromInteger hid) (fromInteger vid))
+    (fromInteger hid) 
+    (fromInteger vid)
     newVal
   unless success $ throwError err404
 
@@ -82,7 +84,8 @@ postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
 postValue hid _ vid newVal = do
   ServerEnv {..} <- ask
   success <- liftIO $ Z.setValue _manager
-                                 (Z.ZVID (fromInteger hid) (fromInteger vid))
+                                 (fromInteger hid)
+                                 (fromInteger vid)
                                  (convertToZWaveValue newVal)
   unless success $ throwError err404
 
@@ -113,6 +116,20 @@ stateBroadcast ServerEnv {..} = do
   go chan = do
     hmap <- liftIO . atomically $ TChan.readTChan chan
     yield hmap
+    go chan
+
+eventBroadcast :: MonadIO m => ServerEnv -> Conduit () m ZEvent
+eventBroadcast ServerEnv {..} = do
+  (chan, h0) <- liftIO . atomically $ do
+    c <- TChan.dupTChan _eventBroadcastChan
+    hmap0 <- _homeMap <$> TVar.readTVar _state
+    return (c, hmap0)
+  yield $ Init h0
+  go chan
+ where
+  go chan = do
+    event <- liftIO . atomically $ TChan.readTChan chan
+    yield event
     go chan
 
 snapshot :: AppM HomeMap

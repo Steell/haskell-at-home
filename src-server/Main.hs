@@ -4,18 +4,17 @@ module Main where
 
 import           Api
 
-import           Control.Concurrent.STM         ( atomically )
+import           Control.Concurrent.STM         ( STM, atomically )
 import           Control.Concurrent.STM.TVar    ( newTVarIO
                                                 , readTVar
                                                 , writeTVar
                                                 )
-import           Control.Concurrent.STM.TChan   ( newBroadcastTChanIO
+import           Control.Concurrent.STM.TChan   ( TChan
+                                                , newBroadcastTChanIO
                                                 , writeTChan
                                                 )
 
-import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
-import qualified Data.Text                     as Text
 
 import qualified OpenZWave.Ozw                 as OZW
 
@@ -34,8 +33,9 @@ main = do
     [device]      <- getArgs
     manager       <- initOzw device
     emptyState    <- newTVarIO emptyZWaveState
-    broadcastChan <- newBroadcastTChanIO
-    let env = ServerEnv emptyState manager broadcastChan
+    stateChan     <- newBroadcastTChanIO
+    eventChan     <- newBroadcastTChanIO
+    let env = ServerEnv emptyState manager stateChan eventChan
     hookZWaveNotifications env
     run 8081 $ serverApp env
   where
@@ -47,21 +47,21 @@ main = do
         unregister <- Z.registerNotificationEvent _manager $ \notification ->
             atomically $ do
                 state <- readTVar _state
-                let state'@ZWaveState {..} = updateState notification state
+                state'@ZWaveState {..} <- updateState _eventBroadcastChan notification state
                 writeTVar _state state'
                 writeTChan _stateBroadcastChan _homeMap
-                -- return _homeMap
-            -- putStrLn $ "newState: " ++ show map
         return ()
 
     -- TODO: this is a garbage fire
-    updateState :: Z.Notification -> ZWaveState -> ZWaveState
-    updateState n s@ZWaveState {..} = go n
+    updateState :: TChan ZEvent -> Z.Notification -> ZWaveState -> STM ZWaveState
+    updateState chan n s@ZWaveState {..} = go n
       where
         go (Z.DriverReady hid) =
             let homeId = toInteger hid
                 home   = Home homeId Map.empty
-            in  s { _homeMap = Map.insert homeId home _homeMap }
+            in  do
+                writeTChan chan $ HomeAdded home
+                return s { _homeMap = Map.insert homeId home _homeMap }
 
         go (Z.NodeAdded Z.NodeInfo {..}) =
             let
@@ -75,8 +75,9 @@ main = do
                            , _deviceProductType = _nodeProductType
                            , _deviceValues = Map.empty
                            }
-            in
-                s
+            in do
+                writeTChan chan $ DeviceAdded homeId device
+                return s
                     { _homeMap =
                         Map.adjust
                             (\h@Home {..} -> h
@@ -92,8 +93,9 @@ main = do
             = let
                   deviceId = toInteger id
                   homeId   = toInteger hid
-              in
-                  s
+              in do
+                  writeTChan chan $ DeviceRemoved homeId deviceId
+                  return s
                       { _homeMap =
                           Map.adjust
                               (\h@Home {..} -> h
@@ -104,9 +106,9 @@ main = do
                               homeId
                               _homeMap
                       }
-        go (Z.ValueAdded (Z.ZVID hid vid) Z.ValueInfo {..} vData)
+        go (Z.ValueAdded hid Z.ValueInfo {..} vData)
             = let
-                  valueId          = toInteger vid
+                  valueId          = toInteger _vInfoId
                   homeId           = toInteger hid
                   deviceId         = toInteger _vInfoNode
                   value@Value {..} = Value
@@ -114,8 +116,9 @@ main = do
                       , _valueState = convertZWaveValue vData
                       , _valueName  = _vInfoName
                       }
-              in
-                  s
+              in do
+                  writeTChan chan $ ValueAdded homeId deviceId value
+                  return s
                       { _homeMap =
                           Map.adjust
                               (\h@Home {..} -> h
@@ -140,8 +143,9 @@ main = do
                   homeId   = toInteger hid
                   deviceId = toInteger nid
                   valueId  = toInteger vid
-              in
-                  s
+              in do
+                  writeTChan chan $ ValueRemoved homeId deviceId valueId
+                  return s
                       { _homeMap =
                           Map.adjust
                               (\h@Home {..} -> h
@@ -165,9 +169,10 @@ main = do
                   homeId   = toInteger hid
                   deviceId = toInteger nid
                   valueId  = toInteger vid
-              in
-
-                  s
+                  state    = convertZWaveValue vData
+              in do
+                  writeTChan chan $ ValueChanged homeId deviceId valueId state
+                  return s
                       { _homeMap =
                           Map.adjust
                               (\h@Home {..} -> h
@@ -178,8 +183,7 @@ main = do
                                                   Map.adjust
                                                       (\v -> v
                                                           { _valueState =
-                                                              convertZWaveValue
-                                                                  vData
+                                                              state
                                                           }
                                                       )
                                                       valueId
@@ -193,4 +197,4 @@ main = do
                               homeId
                               _homeMap
                       }
-        go _ = s
+        go _ = return s

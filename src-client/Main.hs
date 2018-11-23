@@ -48,14 +48,9 @@ data DoorState = Open | Closed
 myconfig :: [String] -> ZWave' (Event (IO ()))
 myconfig phoneNumbers = do
     home         <- getHomeById 4171812579
-
-    strs         <- showHomeEventDiff $ _zwhChanges home
-    let evts' = putStrLn <$> strs
-
     let addrs = fmap
             (SMTP.Address Nothing . Text.pack . (<> "@msg.fi.google.com"))
             phoneNumbers
-
     List.foldl' (unionWith (>>)) never <$> sequenceA
         [ singleDimmerCfg home guestroom
         , singleDimmerCfg home diningroom
@@ -64,7 +59,6 @@ myconfig phoneNumbers = do
         , globalCfg home all
         -- , entranceCfg frontDoorSensor [livingroomEntry]
         , washerCfg addrs home washerOutlet
-        , return evts'
         ]
   where
     livingroom        = [livingroomEntry, livingroomMantle, livingroomSeating]
@@ -207,7 +201,7 @@ mergeE f = List.foldl' (unionWith f) never
 getDoorEvent :: ZWaveDevice -> ZWave' (Event DoorState)
 getDoorEvent d =
     getDeviceValueByName "Access Control" d
-        <&> (   valueEvents
+        <&> (   valueChanges
             >>> fmap (preview _VByte)
             >>> filterJust
             >>> fmap lookup
@@ -221,7 +215,7 @@ getDoorEvent d =
 getSceneEvent :: ZWaveDevice -> ZWave' (Event Scene)
 getSceneEvent d =
     getDeviceValueByName "Scene Number" d
-        <&> (   valueEvents
+        <&> (   valueChanges
             >>> fmap (preview _VByte)
             >>> filterJust
             >>> fmap (flip Map.lookup sceneNumberMap)
@@ -261,7 +255,7 @@ washerCfg
 washerCfg addrs home d = do
     device <- getDeviceById d home
     powerV <- getDeviceValueByName "Power" device
-    powerE <- fmap (^?! _VDecimal) <$> valueChanges powerV
+    let powerE = (^?! _VDecimal) <$> valueChanges powerV
     powerB <- stepper 0 powerE
 
     let reactToChange :: Float -> Float -> IO ()

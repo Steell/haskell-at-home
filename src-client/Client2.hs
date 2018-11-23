@@ -19,13 +19,14 @@ import           Api                            ( ConduitClient
                                                 , ValueState
                                                 , clientIO
                                                 , handleState
+                                                , handleEvents
                                                 )
 
 import           Conduit                        ( await
                                                 , (.|)
                                                 )
 
-import           Control.Concurrent.Async       ( async )
+import           Control.Concurrent.Async       ( async, race_ )
 import           Control.Monad                  ( void )
 import           Control.Monad.Reader           ( MonadReader
                                                 , ReaderT
@@ -54,12 +55,18 @@ import           Servant.Client                 ( Client
 
 runClient :: ClientEnv -> ZWave Moment (Event (IO ())) -> IO ()
 runClient cenv cfg = do
-    (eventHandler, write) <- newAddHandler
+    (eventHandler, writeEvent) <- newAddHandler
+    (stateHandler, writeState) <- newAddHandler
     let client  = clientIO cenv
-        netDesc = dNetwork client cfg eventHandler
+        netDesc = dNetwork client cfg stateHandler eventHandler
     compile netDesc >>= actuate
-    void . handleState client $ do
-        liftIO $ putStrLn "Connected to server."
+    race_  (async $ thread (handleState client) writeState) 
+           (async $ thread (handleEvents client) writeEvent)
+  where
+    thread :: (ConduitClient a () -> IO ()) -> (a -> IO ()) -> IO ()
+    thread connect write =
+      void . connect $ do
+        liftIO $ putStrLn "Connected to socket."
         Conduit.mapM_ (liftIO . write)
 
 data Change a b = Added a | Deleted | Changed b

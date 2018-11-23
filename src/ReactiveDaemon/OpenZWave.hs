@@ -58,15 +58,11 @@ data ValueInfo = ValueInfo { _vInfoId   :: !ValueId
     deriving (Show)
 -- makeLenses ''ValueInfo
 
-
-data ZVID = ZVID !HomeId !CULLong
-  deriving (Show)
-
 data Notification
   = DriverReady !HomeId
   | NodeAdded !NodeInfo
   | NodeRemoved !HomeId !NodeId
-  | ValueAdded !ZVID !ValueInfo !ValueData
+  | ValueAdded !HomeId !ValueInfo !ValueData
   | ValueRemoved !HomeId !NodeId !ValueId
   | ValueChanged !HomeId !NodeId !ValueId !ValueData
   | AwakeNodesQueried
@@ -114,7 +110,7 @@ registerNotificationEvent m = addHandler
                     <*> Z.notification_GetNodeId n
             Z.NotificationType_ValueAdded -> do
                 v' <- Z.notification_GetValueID n
-                v  <- ZVID <$> Z.notification_GetHomeId n <*> Z.valueID_GetId v'
+                v  <- Z.notification_GetHomeId n
                 ValueAdded v <$> extractValue v' <*> convertValue m v'
             Z.NotificationType_ValueRemoved -> do
                 valueId <- Z.notification_GetValueID n
@@ -159,8 +155,8 @@ initOzw ZWaveOptions {..} = do
         $ fail "could not add driver"
     return zwManager
 
-setValue :: Z.Manager -> ZVID -> ValueData -> IO Bool
-setValue m (ZVID !hid !vid) d = do
+setValue :: Z.Manager -> HomeId -> ValueId -> ValueData -> IO Bool
+setValue m !hid !vid d = do
     v <- toGc =<< Z.valueID_unpack hid vid
     --name <- Z.manager_GetValueLabel m v
     -- t <- Z.valueID_GetType v
@@ -175,8 +171,8 @@ setValue m (ZVID !hid !vid) d = do
         (VTString s) -> Z.manager_SetStringValue m v s
         _            -> error "todo: implement setValue"
 
-setValueFromString :: Z.Manager -> ZVID -> String -> IO Bool
-setValueFromString m (ZVID !hid !vid) d = do
+setValueFromString :: Z.Manager -> HomeId -> ValueId -> String -> IO Bool
+setValueFromString m !hid !vid d = do
     v <- toGc =<< Z.valueID_unpack hid vid
     Z.manager_SetStringValue m v d
 
