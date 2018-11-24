@@ -74,9 +74,13 @@ server env =
 postValueString :: HomeId -> DeviceId -> ValueId -> String -> AppM ()
 postValueString hid _ vid newVal = do
   ServerEnv {..} <- ask
-  success        <- liftIO
-    $ Z.setValueFromString _manager (fromInteger hid) (fromInteger vid) newVal
-  unless success $ throwError err404
+  success        <- liftIO $ Z.setValueFromString _manager 
+                                                  (fromInteger hid)
+                                                  (fromInteger vid)
+                                                  newVal
+  if success
+    then liftIO . putStrLn $ "Success (string): " <> show vid <> " <== " <> newVal
+    else throwError err404
 
 postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
 postValue hid _ vid newVal = do
