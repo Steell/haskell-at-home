@@ -63,7 +63,8 @@ serverApp env = serve serverApi
   where toHandler = flip runReaderT
 
 server :: ServerEnv -> ServerT API AppM
-server env = stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot
+server env =
+  stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot
  where
   values hid did vid =
     postValueString hid did vid
@@ -73,21 +74,20 @@ server env = stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapsho
 postValueString :: HomeId -> DeviceId -> ValueId -> String -> AppM ()
 postValueString hid _ vid newVal = do
   ServerEnv {..} <- ask
-  success        <- liftIO $ Z.setValueFromString
-    _manager
-    (fromInteger hid) 
-    (fromInteger vid)
-    newVal
+  success        <- liftIO
+    $ Z.setValueFromString _manager (fromInteger hid) (fromInteger vid) newVal
   unless success $ throwError err404
 
 postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
 postValue hid _ vid newVal = do
   ServerEnv {..} <- ask
-  success <- liftIO $ Z.setValue _manager
-                                 (fromInteger hid)
-                                 (fromInteger vid)
-                                 (convertToZWaveValue newVal)
-  unless success $ throwError err404
+  success        <- liftIO $ Z.setValue _manager
+                                        (fromInteger hid)
+                                        (fromInteger vid)
+                                        (convertToZWaveValue newVal)
+  if success
+    then liftIO . putStrLn $ "Success: " <> show vid <> " <== " <> show newVal
+    else throwError err404
 
 getValue :: HomeId -> DeviceId -> ValueId -> AppM Value
 getValue hid did vid = do
@@ -121,7 +121,7 @@ stateBroadcast ServerEnv {..} = do
 eventBroadcast :: MonadIO m => ServerEnv -> Conduit () m ZEvent
 eventBroadcast ServerEnv {..} = do
   (chan, h0) <- liftIO . atomically $ do
-    c <- TChan.dupTChan _eventBroadcastChan
+    c     <- TChan.dupTChan _eventBroadcastChan
     hmap0 <- _homeMap <$> TVar.readTVar _state
     return (c, hmap0)
   yield $ Init h0
