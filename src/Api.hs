@@ -132,13 +132,18 @@ data ZEvent = Init HomeMap
 instance JSON.ToJSON ZEvent
 instance JSON.FromJSON ZEvent
 
+data SetValue = FromString String
+              | FromState ValueState
+  deriving (Generic, Show)
+instance JSON.ToJSON SetValue
+instance JSON.FromJSON SetValue
+
 type API =  "state"  :> WebSocketConduit () HomeMap
        :<|> "events" :> WebSocketConduit () ZEvent
        :<|> Capture "home" HomeId
          :> Capture "device" DeviceId
          :> Capture "value" ValueId
-         :> (    ReqBody '[JSON] String     :> Post '[JSON] ()
-            :<|> ReqBody '[JSON] ValueState :> Post '[JSON] ()
+         :> (    ReqBody '[JSON] SetValue :> Post '[JSON] ()
             :<|> Get '[JSON] Value)
        :<|> "snapshot" :> Get '[JSON] HomeMap
 
@@ -205,8 +210,11 @@ getSnapshot (_ :<|> _ :<|> _ :<|> f) = f
 
 setValueString
   :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
-setValueString (_ :<|> _ :<|> valueApi :<|> _) h d v = fst $ valueApi h d v
-  where fst (f :<|> _) = f
+setValueString c h d v = setValue c h d v . FromString
+
+setValueState
+  :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+setValueState c h d v = setValue c h d v . FromState
 
 setValue
   :: Monad m
@@ -214,14 +222,14 @@ setValue
   -> HomeId
   -> DeviceId
   -> ValueId
-  -> ValueState
+  -> SetValue
   -> m ()
-setValue (_ :<|> _ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
-  where snd (_ :<|> f :<|> _) = f
+setValue (_ :<|> _ :<|> valueApi :<|> _) h d v = fst (valueApi h d v)
+  where fst (f :<|> _) = f
 
 getValue :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> m Value
-getValue (_ :<|> _ :<|> valueApi :<|> _) h d v = third $ valueApi h d v
-  where third (_ :<|> _ :<|> f) = f
+getValue (_ :<|> _ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
+  where snd (_ :<|> f) = f
 
 
 --- Attempt at making this a monad
@@ -232,18 +240,22 @@ newtype ClientT m a = ClientT { unClientT :: ReaderT (Client m API) m a }
 class Monad m => MonadZWave m where
   zHandleState :: ConduitClient HomeMap () -> m ()
   zHandleEvents :: ConduitClient ZEvent () -> m ()
-  zSetValueString :: HomeId -> DeviceId -> ValueId -> String -> m ()
-  zSetValue :: HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+  zSetValue :: HomeId -> DeviceId -> ValueId -> SetValue -> m ()
   zGetValue :: HomeId -> DeviceId -> ValueId -> m Value
   zGetSnapshot :: m HomeMap
 
 instance Monad m => MonadZWave (ClientT m) where
   zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
   zHandleEvents cc = ClientT . ReaderT $ \c -> handleEvents c cc
-  zSetValueString h d v s = ClientT . ReaderT $ \c -> setValueString c h d v s
   zGetValue h d v = ClientT . ReaderT $ \c -> getValue c h d v
   zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s
   zGetSnapshot = ClientT $ ReaderT getSnapshot
+
+zSetValueString :: MonadZWave m => HomeId -> DeviceId -> ValueId -> String -> m ()
+zSetValueString h d v = zSetValue h d v . FromString
+
+zSetValueState :: MonadZWave m => HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+zSetValueState h d v = zSetValue h d v . FromState
 
 withZWaveClient :: ClientEnv -> ClientT IO a -> IO a
 withZWaveClient env c = flip runReaderT (clientIO env) $ unClientT c

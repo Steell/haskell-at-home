@@ -66,32 +66,20 @@ server :: ServerEnv -> ServerT API AppM
 server env =
   stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot
  where
-  values hid did vid =
-    postValueString hid did vid
-      :<|> postValue hid did vid
-      :<|> getValue hid did vid
+  values hid did vid = postValue hid did vid :<|> getValue hid did vid
 
-postValueString :: HomeId -> DeviceId -> ValueId -> String -> AppM ()
-postValueString hid _ vid newVal = do
-  ServerEnv {..} <- ask
-  success        <- liftIO $ Z.setValueFromString _manager 
-                                                  (fromInteger hid)
-                                                  (fromInteger vid)
-                                                  newVal
-  if success
-    then liftIO . putStrLn $ "Success (string): " <> show vid <> " <== " <> newVal
-    else throwError err404
-
-postValue :: HomeId -> DeviceId -> ValueId -> ValueState -> AppM ()
+postValue :: HomeId -> DeviceId -> ValueId -> SetValue -> AppM ()
 postValue hid _ vid newVal = do
+  liftIO . putStrLn $ "attempt: " <> show vid <> " <== " <> show newVal
   ServerEnv {..} <- ask
-  success        <- liftIO $ Z.setValue _manager
-                                        (fromInteger hid)
-                                        (fromInteger vid)
-                                        (convertToZWaveValue newVal)
-  if success
-    then liftIO . putStrLn $ "Success: " <> show vid <> " <== " <> show newVal
-    else throwError err404
+  let setValue (FromString s) m h v = Z.setValueFromString m h v s
+      setValue (FromState s) m h v = Z.setValue m h v (convertToZWaveValue s)
+  success        <- liftIO $ setValue newVal 
+                                      _manager
+                                      (fromInteger hid)
+                                      (fromInteger vid)
+  liftIO . putStrLn $ if success then " success!" else " failed!"
+  unless success $ throwError err404
 
 getValue :: HomeId -> DeviceId -> ValueId -> AppM Value
 getValue hid did vid = do

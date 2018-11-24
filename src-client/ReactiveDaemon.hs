@@ -98,7 +98,7 @@ dNetwork client cfg stateHandler evtHandler = do
 
 zwData :: MonadMoment m => Client IO API -> Event HomeMap -> Event ZEvent -> m ZWData
 zwData client eState events = do
-  let setValue' = setValue client
+  let setValue' = setValueState client
   bHomeMap <- stepper Map.empty eState
   return $ ZWData bHomeMap events setValue'
 
