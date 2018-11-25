@@ -10,13 +10,18 @@ let
   overlays = [
     (newPkgs: oldPkgs: with oldPkgs.haskell.lib; {
 
-      openzwave = newPkgs.callPackage ./openzwave+centralscene.nix { inherit (oldPkgs) openzwave; };
+      openzwave = newPkgs.callPackage ./openzwave+centralscene.nix {
+        inherit (oldPkgs) openzwave;
+      };
 
       haskellPackages = oldPkgs.haskellPackages.override {
         overrides = haskellPackagesNew: haskellPackagesOld: rec {
 
           haskell-openzwave =
-            haskellPackagesNew.callPackage ./haskell-openzwave { };
+            haskellPackagesNew.callPackage ./haskell-openzwave {};
+
+          horizon =
+            pkgs.haskell.lib.doJailbreak (haskellPackagesOld.horizon);
 
           smarthome =
             haskellPackagesNew.callPackage ./default.nix {};

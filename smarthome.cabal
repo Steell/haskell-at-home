@@ -54,8 +54,7 @@ executable smarthome-reactive-client
   ghc-options:         -Wall -threaded -fno-warn-name-shadowing
   hs-source-dirs:      src-client
   main-is:             Main.hs
-  other-modules:       Clientn
-                     , ClientApi
+  other-modules:       Client
                      , ReactiveDaemon
   build-depends:       base >= 4.7 && < 5
                      , smarthome
@@ -67,7 +66,7 @@ executable smarthome-reactive-client
                      , aeson
                      , async
                      , conduit
---                     , horizon
+                     , horizon
                      , http-client
                      , lens
                      , servant-websockets
@@ -77,6 +76,7 @@ executable smarthome-reactive-client
                      , smtp-mail
                      , stm
                      , text
+                     , time
                      , websockets
 
 executable smarthome-server

@@ -2,8 +2,6 @@
 
 module Client
     ( runClient
-    , Change(..)
-    , mergeMaps
     )
 where
 
@@ -28,7 +26,7 @@ import           ReactiveDaemon
 
 import           Servant.Client                 ( ClientEnv )
 
-runClient :: ClientEnv -> ZWave Moment (Event (IO ())) -> IO ()
+runClient :: ClientEnv -> ZWave MomentIO () -> IO ()
 runClient cenv cfg = do
     (eventHandler, writeEvent) <- newAddHandler
     (stateHandler, writeState) <- newAddHandler
@@ -42,18 +40,3 @@ runClient cenv cfg = do
     thread connect write = void . connect $ do
         liftIO $ putStrLn "Connected to socket."
         Conduit.mapM_ (liftIO . write)
-
-data Change a b = Added a | Deleted | Changed b
-
-mergeMaps
-    :: (Eq a, Ord k)
-    => (a -> a -> b)
-    -> Map k a
-    -> Map k a
-    -> Map k (Change a b)
-mergeMaps f = Map.merge deleted added matched
-  where
-    matched = Map.zipWithMaybeMatched . const $ \a b ->
-        if a == b then Nothing else Just (Changed $ f a b)
-    deleted = Map.mapMissing . const $ const Deleted
-    added   = Map.mapMissing $ const Added

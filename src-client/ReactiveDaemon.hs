@@ -18,9 +18,8 @@ import           Control.Monad
 import           Control.Monad.Reader
 
 import           Data.Foldable                  ( find )
-import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
--- import qualified Data.Time.Clock as Clock
+import qualified Data.Text                     as Text
 
 import           Reactive.Banana
 import           Reactive.Banana.Frameworks
@@ -33,9 +32,14 @@ data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
   deriving (Eq)
 makePrisms ''Scene
 
+data DeviceInfo = DeviceInfo { _dInfo :: Device
+                             , _dHomeId :: HomeId
+                             }
+  deriving (Show)
+makeLenses ''DeviceInfo
+
 data ValueInfo = ValueInfo { _vInfo :: Value
-                           , _vHomeId :: HomeId
-                           , _vDeviceId :: DeviceId
+                           , _vDeviceInfo :: DeviceInfo
                            }
   deriving (Show)
 makeLenses ''ValueInfo
@@ -45,11 +49,6 @@ data ZWaveValue = ZWaveValue { _zwvInfo    :: Behavior (Maybe ValueInfo)
                              }
 makeLenses ''ZWaveValue
 
-data DeviceInfo = DeviceInfo { _dInfo :: Device
-                             , _dHomeId :: HomeId
-                             }
-  deriving (Show)
-makeLenses ''DeviceInfo
 data DeviceEvent = DValueAdded ValueInfo
                  | DValueRemoved ValueId
                  | DValueChanged ValueId ValueState
@@ -83,9 +82,30 @@ newtype ZWave m a = ZWave { unzwio :: ReaderT ZWData m a }
 instance MonadMoment m => MonadMoment (ZWave m) where
   liftMoment = ZWave . lift . liftMoment
 
+data ZEventSource a = ZEventSource { _eventTag :: String
+                                   , _eventData :: a
+                                   }
+  deriving (Show)
+makeLenses ''ZEventSource
+
+instance Functor ZEventSource where
+  fmap f es = es { _eventData = f (_eventData es) }
+
+instance Applicative ZEventSource where
+  pure = ZEventSource ""
+  ZEventSource {_eventTag=ta,_eventData=f} <*> ZEventSource {_eventTag=tb,_eventData=b} =
+    ZEventSource (ta <> tb) $ f b
+
+instance Foldable ZEventSource where
+  foldMap f ZEventSource {..} = f _eventData
+  foldr f z ZEventSource {..} = f _eventData z
+
+instance Traversable ZEventSource where
+  traverse f ZEventSource {..} = ZEventSource _eventTag <$> f _eventData
+
 dNetwork
   :: Client IO API
-  -> ZWave Moment (Event (IO ())) --TODO: just use MomentIO and let user cfg have access to reactimate?
+  -> ZWave MomentIO ()
   -> AddHandler HomeMap
   -> AddHandler ZEvent
   -> MomentIO ()
@@ -93,10 +113,10 @@ dNetwork client cfg stateHandler evtHandler = do
   eState <- fromAddHandler stateHandler
   eEvt   <- fromAddHandler evtHandler
   zd     <- zwData client eState eEvt
-  eCfg   <- liftMoment . flip runReaderT zd $ unzwio cfg
-  reactimate eCfg
+  flip runReaderT zd $ unzwio cfg
 
-zwData :: MonadMoment m => Client IO API -> Event HomeMap -> Event ZEvent -> m ZWData
+zwData
+  :: MonadMoment m => Client IO API -> Event HomeMap -> Event ZEvent -> m ZWData
 zwData client eState events = do
   let setValue' = setValueState client
   bHomeMap <- stepper Map.empty eState
@@ -117,65 +137,70 @@ partial p x = if p x then Just x else Nothing
 getValue :: ZWaveValue -> Behavior (Maybe ValueState)
 getValue ZWaveValue {..} = fmap (_valueState . _vInfo) <$> _zwvInfo
 
-setValueByteOnEvt
-  :: Monad m => ZWaveValue -> Event Integer -> ZWave m (Event (IO ()))
-setValueByteOnEvt v e = do
-  bSetter <- setValueByte' v
-  return $ bSetter <@> e
-
-setValueByte' :: Monad m => ZWaveValue -> ZWave m (Behavior (Integer -> IO ()))
-setValueByte' ZWaveValue {..} = do
+setValueOnEvent
+  :: ZWaveValue -> Event (ZEventSource ValueState) -> ZWave MomentIO ()
+setValueOnEvent ZWaveValue {..} events = do
   setter <- view zwSetValue
-  let getSetter :: Maybe ValueInfo -> Integer -> IO ()
-      getSetter Nothing               _ = pure ()
-      getSetter (Just ValueInfo {..}) i = do
-        putStrLn
-          $  "{ node: "
-          ++ show _vDeviceId
-          ++ ", valueName: \""
-          ++ _valueName _vInfo
-          ++ "\", oldValue: "
-          ++ show (_valueState _vInfo)
-          ++ " } <= "
-          ++ show i
-        void . setter _vHomeId _vDeviceId (_valueId _vInfo) $ VByte i
-  return $ getSetter <$> _zwvInfo
+  let getSetter :: Maybe ValueInfo -> ZEventSource ValueState -> IO ()
+      getSetter Nothing _               = pure ()
+      getSetter (Just v@ValueInfo {..}) event = do
+        log v event
+        void $ setter (_dHomeId _vDeviceInfo) (_deviceId $ _dInfo _vDeviceInfo) (_valueId _vInfo) (_eventData event)
+  lift $ reactimate $ getSetter <$> _zwvInfo <@> events
+ where
+  log ValueInfo {..} ZEventSource {..} =
+    putStrLn
+      $  _eventTag
+      <> ": "
+      <> show _eventData
+      <> " => "
+      <> "{ device: "
+      <> Text.unpack (_deviceName $ _dInfo _vDeviceInfo)
+      <> ", valueName: \""
+      <> Text.unpack (_valueName _vInfo)
+      <> "\", oldValue: "
+      <> show (_valueState _vInfo)
+      <> " }"
 
-getHomeById :: Monad m => HomeId -> ZWave m ZWaveHome
+getHomeById :: MonadMoment m => HomeId -> ZWave m ZWaveHome
 getHomeById h = do
   bHomeMap <- view zwMap
   eChange  <- view zwChanges
-  return ZWaveHome
-    { _zwhInfo    = Map.lookup h <$> bHomeMap
-    , _zwhChanges = filterJust $ toHomeEvent <$> eChange
-    }
+  let changes = observeE . filterJust $ toHomeEvent bHomeMap <$> eChange
+  return ZWaveHome {_zwhInfo = Map.lookup h <$> bHomeMap, _zwhChanges = changes}
  where
-  toHomeEvent :: ZEvent -> Maybe HomeEvent
-  toHomeEvent (DeviceAdded   h' d)     | h == h' = Just . HDeviceAdded $ DeviceInfo d h
-  toHomeEvent (DeviceRemoved h' d)     | h == h' = Just $ HDeviceRemoved d
-  toHomeEvent (ValueAdded    h' d v)   | h == h' = Just . HValueAdded d $ ValueInfo v d h
-  toHomeEvent (ValueRemoved  h' d v)   | h == h' = Just $ HValueRemoved d v
-  toHomeEvent (ValueChanged  h' d v s) | h == h' = Just $ HValueChanged d v s
-  toHomeEvent _ = Nothing
+  toHomeEvent :: Behavior HomeMap -> ZEvent -> Maybe (Moment HomeEvent)
+  toHomeEvent bHomeMap = go
+   where
+    go (DeviceAdded h' d) | h == h' =
+      Just . return . HDeviceAdded $ DeviceInfo d h
+    go (DeviceRemoved h' d) | h == h'       = Just . return $ HDeviceRemoved d
+    go (ValueAdded h' deviceId v) | h == h' = Just $ do
+      Just d <-
+        valueB bHomeMap
+          <&> (Map.lookup h' >=> _homeDevices >>> Map.lookup deviceId)
+      return . HValueAdded deviceId . ValueInfo v $ DeviceInfo d h
+    go (ValueRemoved h' d v) | h == h' = Just . return $ HValueRemoved d v
+    go (ValueChanged h' d v s) | h == h' = Just . return $ HValueChanged d v s
+    go _                               = Nothing
 
 getDeviceById :: MonadMoment m => DeviceId -> ZWaveHome -> ZWave m ZWaveDevice
 getDeviceById deviceId ZWaveHome {..} = do
-  let
-    mkInfo Home {..} = do
-      d <- Map.lookup deviceId _homeDevices
-      return $ DeviceInfo d _homeId
+  let mkInfo Home {..} = do
+        d <- Map.lookup deviceId _homeDevices
+        return $ DeviceInfo d _homeId
 
-    info :: Behavior (Maybe DeviceInfo)
-    info = _zwhInfo <&> (>>= mkInfo)
+      info :: Behavior (Maybe DeviceInfo)
+      info = _zwhInfo <&> (>>= mkInfo)
 
-    changes :: Event DeviceEvent
-    changes = filterJust $ _zwhChanges <&> toDeviceEvent
+      changes :: Event DeviceEvent
+      changes = filterJust $ _zwhChanges <&> toDeviceEvent
 
   return ZWaveDevice {_zwdInfo = info, _zwdChanges = changes}
  where
   toDeviceEvent :: HomeEvent -> Maybe DeviceEvent
-  toDeviceEvent (HValueAdded   d v)   | d == deviceId = Just $ DValueAdded v
-  toDeviceEvent (HValueRemoved d v)   | d == deviceId = Just $ DValueRemoved v
+  toDeviceEvent (HValueAdded d v) | d == deviceId = Just $ DValueAdded v
+  toDeviceEvent (HValueRemoved d v) | d == deviceId = Just $ DValueRemoved v
   toDeviceEvent (HValueChanged d v s) | d == deviceId = Just $ DValueChanged v s
   toDeviceEvent _ = Nothing
 
@@ -184,38 +209,40 @@ app mf a = mf >>= ($ a)
 
 getDeviceValueByName :: MonadMoment m => String -> ZWaveDevice -> m ZWaveValue
 getDeviceValueByName name ZWaveDevice {..} = do
-  let mkValueInfo :: DeviceInfo -> Maybe ValueInfo
-      mkValueInfo DeviceInfo {..} = do
-        v <- find ((== name) . _valueName) . Map.elems $ _deviceValues _dInfo
-        return ValueInfo
-          { _vInfo     = v
-          , _vDeviceId = _deviceId _dInfo
-          , _vHomeId   = _dHomeId
-          }
+  let
+    mkValueInfo :: DeviceInfo -> Maybe ValueInfo
+    mkValueInfo d@DeviceInfo {..} = do
+      v <-
+        find ((== name) . Text.unpack . _valueName) . Map.elems $ _deviceValues
+          _dInfo
+      return ValueInfo {_vInfo = v, _vDeviceInfo = d}
 
-      info :: Behavior (Maybe ValueInfo)
-      info = _zwdInfo <&> (>>= mkValueInfo)
+    info :: Behavior (Maybe ValueInfo)
+    info = _zwdInfo <&> (>>= mkValueInfo)
 
-      blookup :: Behavior (DeviceEvent -> Maybe ValueEvent)
-      blookup = info <&> (\mVi de -> do
-                               vi <- mVi
-                               a <- extractValueInfo de
-                               lookup vi a)
-        where
-          extractValueInfo :: DeviceEvent -> Maybe (ValueId, ValueEvent)
-          extractValueInfo (DValueChanged v s) = Just (v, VValueChanged s)
-          extractValueInfo _ = Nothing
+    blookup :: Behavior (DeviceEvent -> Maybe ValueEvent)
+    blookup =
+      info
+        <&> (\mVi de -> do
+              vi <- mVi
+              a  <- extractValueInfo de
+              lookup vi a
+            )
+     where
+      extractValueInfo :: DeviceEvent -> Maybe (ValueId, ValueEvent)
+      extractValueInfo (DValueChanged v s) = Just (v, VValueChanged s)
+      extractValueInfo _                   = Nothing
 
-          lookup :: ValueInfo -> (ValueId, ValueEvent) -> Maybe ValueEvent
-          lookup ValueInfo {_vInfo=Value{_valueId=v'}} (v, s) = toMaybe (v == v') s
+      lookup :: ValueInfo -> (ValueId, ValueEvent) -> Maybe ValueEvent
+      lookup ValueInfo { _vInfo = Value { _valueId = v' } } (v, s) =
+        toMaybe (v == v') s
 
-      changes = filterJust $ blookup <@> _zwdChanges
+    changes = filterJust $ blookup <@> _zwdChanges
 
-  changes' <- distinct changes
-  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes'}
+  return ZWaveValue {_zwvInfo = info, _zwvChanges = changes}
 
 toMaybe :: Bool -> a -> Maybe a
-toMaybe True = Just
+toMaybe True  = Just
 toMaybe False = const Nothing
 
 distinct :: (MonadMoment m, Eq a) => Event a -> m (Event a)
@@ -224,19 +251,14 @@ distinct = fmap (filterJust . fst) . mapAccum Nothing . fmap f
   f y (Just x) = if x == y then (Nothing, Just x) else (Just y, Just y)
   f y Nothing  = (Just y, Just y)
 
-{-
-
--- TODO: need to account for events that might not originate from the ZWave graph
-data ZEventSource a = ZEventSource { _eventValueInfo :: ValueInfo
-                                   , _eventDeviceInfo :: DeviceInfo
-                                   , _eventHomeInfo :: HomeInfo
-                                   , _eventData :: a
-                                   }
-
-instance Functor ZEventSource where
-  fmap f es = es { _eventData = f (_eventData es) }
-
--}
-
-valueChanges :: ZWaveValue -> Event ValueState
-valueChanges = fmap (\(VValueChanged s) -> s) . _zwvChanges
+valueChanges :: ZWaveValue -> Event (ZEventSource ValueState)
+valueChanges ZWaveValue {..} = filterJust . observeE $ fmap
+  (valueB . toEventSource)
+  _zwvChanges
+ where
+  toEventSource (VValueChanged s) = fmap (flip ZEventSource s) <$> mTag
+  format a b = a <> ": " <> b
+  mTag = liftA2 format <$> device <*> value
+  device =
+    fmap (Text.unpack . _deviceName . _dInfo . _vDeviceInfo) <$> _zwvInfo
+  value = fmap (Text.unpack . _valueName . _vInfo) <$> _zwvInfo

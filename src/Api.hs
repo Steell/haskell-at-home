@@ -92,7 +92,7 @@ convertToZWaveValue VRaw         = Z.VTRaw
 
 data Value = Value { _valueId :: ValueId
                    , _valueState :: ValueState
-                   , _valueName :: String
+                   , _valueName :: Text
                    }
   deriving (Eq, Show, Generic)
 instance JSON.ToJSON Value

@@ -52,7 +52,7 @@ data ValueData = VTBool !Bool
 -- makePrisms ''ValueData
 
 data ValueInfo = ValueInfo { _vInfoId   :: !ValueId
-                           , _vInfoName :: !String
+                           , _vInfoName :: !Text
                            , _vInfoNode :: !NodeId
                            }
     deriving (Show)
@@ -104,20 +104,22 @@ registerNotificationEvent m = addHandler
                 !prod  <- Text.pack <$> Z.manager_GetNodeProductName m hid nid
                 !pType <- Text.pack <$> Z.manager_GetNodeProductType m hid nid
                 return . NodeAdded $ NodeInfo hid nid name manu prod pType
-            Z.NotificationType_NodeRemoved ->
-                NodeRemoved
-                    <$> Z.notification_GetHomeId n
-                    <*> Z.notification_GetNodeId n
+            Z.NotificationType_NodeRemoved -> do
+                !h <- Z.notification_GetHomeId n
+                !n <- Z.notification_GetNodeId n
+                return $ NodeRemoved h n
             Z.NotificationType_ValueAdded -> do
-                v' <- Z.notification_GetValueID n
-                v  <- Z.notification_GetHomeId n
-                ValueAdded v <$> extractValue v' <*> convertValue m v'
+                !v'    <- Z.notification_GetValueID n
+                !h     <- Z.notification_GetHomeId n
+                !data' <- convertValue m v'
+                !vInfo <- extractValue v'
+                return $ ValueAdded h vInfo data'
             Z.NotificationType_ValueRemoved -> do
-                valueId <- Z.notification_GetValueID n
-                ValueRemoved
-                    <$> Z.notification_GetHomeId n
-                    <*> Z.valueID_GetNodeId valueId
-                    <*> Z.valueID_GetId valueId
+                !valueId <- Z.notification_GetValueID n
+                !h <- Z.notification_GetHomeId n
+                !n <- Z.valueID_GetNodeId valueId
+                !v <- Z.valueID_GetId valueId
+                return $ ValueRemoved h n v
             Z.NotificationType_ValueChanged -> do
                 !v     <- Z.notification_GetValueID n
                 !name  <- Z.manager_GetValueLabel m v
@@ -134,11 +136,11 @@ registerNotificationEvent m = addHandler
             Z.NotificationType_AllNodesQueried -> return AllNodesQueried
             t -> return $ Unsupported t
 
-    extractValue v =
-        ValueInfo
-            <$> Z.valueID_GetId v
-            <*> Z.manager_GetValueLabel m v
-            <*> Z.valueID_GetNodeId v
+    extractValue v = do
+        !vid <- Z.valueID_GetId v
+        !n   <- Text.pack <$> Z.manager_GetValueLabel m v
+        !nid <- Z.valueID_GetNodeId v
+        return $ ValueInfo vid n nid
 
 defaultOptions :: ZWaveOptions
 defaultOptions = ZWaveOptions "/usr/local/etc/openzwave"
