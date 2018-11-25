@@ -55,7 +55,7 @@ data DoorState = Open | Closed
 
 myconfig :: [String] -> ZWave MomentIO ()
 myconfig phoneNumbers = do
-    home <- getHomeById 4171812579
+    home <- getHomeById 660018 --TODO: apparently this is not stable?
 
     singleDimmerCfg home guestroom
     singleDimmerCfg home diningroom
@@ -156,17 +156,15 @@ mergeE f = List.foldl' (unionWith f) never
 getDoorEvent
     :: MonadMoment m => ZWaveDevice -> ZWave m (Event (ZEventSource DoorState))
 getDoorEvent d =
-    getDeviceValueByName "Access Control" d
+    getDeviceValueByName "Sensor" d
         <&> (   valueChanges
-            >$> (fmap (preview _VByte) >>> sequence)
+            >$> (fmap (preview _VBool) >>> sequence)
             >>> filterJust
-            >$> (fmap lookup >>> sequence)
-            >>> filterJust
+            >$> fmap lookup
             )
   where
-    lookup 22 = Just Open
-    lookup 23 = Just Closed
-    lookup _  = Nothing
+    lookup True = Open
+    lookup False = Closed
 
 getSceneEvent
     :: MonadMoment m => ZWaveDevice -> ZWave m (Event (ZEventSource Scene))
