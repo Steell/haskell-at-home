@@ -66,7 +66,7 @@ myconfig phoneNumbers = do
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
     washerCfg addrs home washerOutlet
-    
+
   where
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
@@ -227,7 +227,7 @@ washerCfg addrs home d = do
     lift . reactimate $ (powerB <&> reactToChange) <@> powerE
 
 sendEmail :: [SMTP.Address] -> IO ()
-sendEmail to = SMTP.sendMail "localhost" mail
+sendEmail to = SMTP.renderSendMail mail
   where
     mail = SMTP.simpleMail from to [] [] subject [SMTP.plainTextPart msg]
     from =
