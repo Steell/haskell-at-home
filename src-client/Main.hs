@@ -66,34 +66,34 @@ myconfig phoneNumbers = do
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
     washerCfg addrs home washerOutlet
-
   where
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
     guestroom       = 2 --("guest bedroom / office", [("all", 2)])
     bedroom@[bedroomFront, bedroomKellie, bedroomSteve] = [6 .. 8]
     diningroom      = 9 -- ("dining room", [("all", 9)])
-    all             = livingroom ++ bedroom ++ [diningroom]
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
     basement@[basementStairs, basementSeating, basementConsole] = [12 .. 14]
+    all             = livingroom ++ bedroom ++ [diningroom]
 
 entranceCfg :: ZWaveHome -> DeviceId -> [DeviceId] -> ZWave MomentIO ()
 entranceCfg home entry lights = do
-    entryDevice <- getDeviceById entry home
-    lightDevs   <- mapM
-        (flip getDeviceById home >=> getDeviceValueByName "Level")
-        lights
-    doorE <- getDoorEvent entryDevice
-    sunB  <- lift isSunOutB
+    let entryDevice = getDeviceById home entry
+        lightDevs =
+            getDeviceValueByName "Level" . getDeviceById home <$> lights
+        doorE = getDoorEvent entryDevice
 
-    let setLevelsOnEvt e v = setValueOnEvent v $ fmap (fmap VByte) e
-        newLevelEvt =
-            whenE (not <$> sunB) . filterJust $ traverse toLevel <$> doorE
+    isDaytime <- lift isSunOutB
+    let newLevelEvt =
+            unlessE isDaytime . filterJust $ traverse toLevel <$> doorE
         toLevel Closed = Nothing
         toLevel Open   = Just 0xFF -- last setting
 
-    mapM_ (setLevelsOnEvt newLevelEvt) lightDevs
+    (fmap VByte <$> newLevelEvt) ~$> lightDevs
+
+unlessE :: Behavior Bool -> Event a -> Event a
+unlessE = whenE . fmap not
 
 isSunOutB :: MomentIO (Behavior Bool)
 isSunOutB = fromPoll getCurrentTime <&> fmap isSunOut
@@ -110,29 +110,19 @@ dimmerCfg
     -> (Scene -> Maybe Integer)
     -> ZWave MomentIO ()
 dimmerCfg home ins outs toLevel = do
-    sourceDevices <- mapM (flip getDeviceById home) ins
-    targetDevices <- mapM (flip getDeviceById home) outs
+    let sourceDevices    = getDeviceById home <$> ins
+        targetDevices    = getDeviceById home <$> outs
+        getSetLevelEvent = getSceneEvent >$> traverse toLevel >>> filterJust
+        newLevelEvent =
+            fmap VByte <$> mergeE const (getSetLevelEvent <$> sourceDevices)
 
-    let setLevelsOnEvt :: Event (ZEventSource Integer) -> ZWave MomentIO ()
-        setLevelsOnEvt byteE =
-            targetDevices
-                `forM_` (   getDeviceValueByName "Level"
-                        >=> flip setValueOnEvent (fmap VByte <$> byteE)
-                        )
+    newLevelEvent ~$> (getDeviceValueByName "Level" <$> targetDevices)
 
-        events :: ZWave MomentIO [Event (ZEventSource Integer)]
-        events =
-            sequence
-                $   sourceDevices
-                <&> (   getSceneEvent
-                    >$> (fmap (fmap toLevel >>> sequence) >>> filterJust)
-                    )
-
-    newLevelEvt <- mergeE const <$> events
-    setLevelsOnEvt newLevelEvt
-
-(>$>) :: Functor f => (a -> f b) -> (b -> c) -> (a -> f c)
+(>$>) :: Functor f => (a -> f b) -> (b -> c) -> a -> f c
 ff >$> g = fmap g . ff
+
+(<$<) :: Functor f => (b -> c) -> (a -> f b) -> a -> f c
+(<$<) = flip (>$>)
 
 globalCfg :: ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
 globalCfg home ds = dimmerCfg home ds ds toLevel
@@ -153,29 +143,27 @@ multiDimmerCfg home ds = dimmerCfg home ds ds $ toLevel >>> Just
 mergeE :: (b -> b -> b) -> [Event b] -> Event b
 mergeE f = List.foldl' (unionWith f) never
 
-getDoorEvent
-    :: MonadMoment m => ZWaveDevice -> ZWave m (Event (ZEventSource DoorState))
+getDoorEvent :: ZWaveDevice -> Event (ZEventSource DoorState)
 getDoorEvent d =
     getDeviceValueByName "Sensor" d
-        <&> (   valueChanges
-            >$> (fmap (preview _VBool) >>> sequence)
-            >>> filterJust
-            >$> fmap lookup
-            )
+        & (   valueChanges
+          >$> traverse (preview _VBool)
+          >>> filterJust
+          >$> fmap lookup
+          )
   where
-    lookup True = Open
+    lookup True  = Open
     lookup False = Closed
 
-getSceneEvent
-    :: MonadMoment m => ZWaveDevice -> ZWave m (Event (ZEventSource Scene))
+getSceneEvent :: ZWaveDevice -> Event (ZEventSource Scene)
 getSceneEvent d =
     getDeviceValueByName "Scene Number" d
-        <&> (   valueChanges
-            >$> (fmap (preview _VByte) >>> sequence)
-            >>> filterJust
-            >$> (fmap (flip Map.lookup sceneNumberMap) >>> sequence)
-            >>> filterJust
-            )
+        & (   valueChanges
+          >$> traverse (preview _VByte)
+          >>> filterJust
+          >$> traverse (flip Map.lookup sceneNumberMap)
+          >>> filterJust
+          )
   where
     sceneNumberMap :: Map Integer Scene
     sceneNumberMap = Map.fromList
@@ -183,45 +171,38 @@ getSceneEvent d =
 
 singleDimmerCfg :: ZWaveHome -> DeviceId -> ZWave MomentIO ()
 singleDimmerCfg home d = do
-    device   <- getDeviceById d home
-    levelV   <- getDeviceValueByName "Level" device
-    sceneEvt <- getSceneEvent device
+    let device   = getDeviceById home d
+        levelV   = getDeviceValueByName "Level" device
+        sceneEvt = getSceneEvent device
 
-    let handlerB :: Behavior (Scene -> Maybe Integer)
-        handlerB =
-            getValue levelV
-                <&> ((>>= (preview _VByte >>> fmap handleScene)) >>> liftM)
+        handlerB :: Behavior (Scene -> Maybe Integer)
+        handlerB = handler <$> getValue levelV
+          where
+            handler mv s =
+                mv ^? _Just . _VByte . to (handleScene s) . _Just
+
+        newLevelEvt :: Event (ZEventSource ValueState)
         newLevelEvt =
-            fmap (fmap VByte)
-                .   filterJust
-                .   fmap sequence
-                $   fmap
-                <$> handlerB
-                <@> sceneEvt
+            fmap (fmap VByte) . filterJust $ traverse <$> handlerB <@> sceneEvt
 
-    setValueOnEvent levelV newLevelEvt
+    newLevelEvt ~> levelV
   where
-    handleScene :: Integer -> Scene -> Maybe Integer
-    handleScene 0 DoubleUp   = Just 0xFF -- preview level
-    handleScene 0 TripleUp   = Just 0xFF
-    handleScene _ DoubleUp   = Just 0x63 -- max level
-    handleScene _ TripleUp   = Just 0x63 -- max level
-    handleScene _ DoubleDown = Just 0  -- off
-    handleScene _ TripleDown = Just 0
-
-    liftM :: Monad m => m (a -> m b) -> a -> m b
-    liftM ff a = ($ a) =<< ff
+    handleScene :: Scene -> Integer -> Maybe Integer
+    handleScene DoubleUp   0 = Just 0xFF -- previous level
+    handleScene TripleUp   0 = Just 0xFF
+    handleScene DoubleUp   _ = Just 0x63 -- max level
+    handleScene TripleUp   _ = Just 0x63 -- max level
+    handleScene DoubleDown _ = Just 0    -- off
+    handleScene TripleDown _ = Just 0
 
 washerCfg :: [SMTP.Address] -> ZWaveHome -> DeviceId -> ZWave MomentIO ()
 washerCfg addrs home d = do
-    device <- getDeviceById d home
-    powerV <- getDeviceValueByName "Power" device
-    let powerE = (^?! eventData . _VDecimal) <$> valueChanges powerV
-    powerB <- stepper 0 powerE
-
-    let reactToChange :: Float -> Float -> IO ()
+    let device = getDeviceById home d
+        powerV = getDeviceValueByName "Power" device
+        powerE = (^?! eventData . _VDecimal) <$> valueChanges powerV
         reactToChange old new = when (old > 0 && new < 0.5) $ sendEmail addrs
 
+    powerB <- stepper 0 powerE
     lift . reactimate $ (powerB <&> reactToChange) <@> powerE
 
 sendEmail :: [SMTP.Address] -> IO ()

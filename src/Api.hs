@@ -27,15 +27,11 @@ import           Data.ByteString.Lazy.Builder   ( toLazyByteString )
 import           Data.ByteString.Lazy.Char8     ( unpack )
 import qualified Data.Conduit.List             as CL
 import           Data.Map.Strict                ( Map )
-import qualified Data.Map.Strict               as Map
-import           Data.Proxy
+import           Data.Proxy                     ( Proxy(..) )
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as Text
-import           Data.Word
 
-import           Foreign.C.Types
-
-import           GHC.Generics
+import           GHC.Generics                   ( Generic )
 
 import qualified Network.WebSockets            as WS
 
@@ -119,7 +115,6 @@ instance JSON.ToJSON Home
 instance JSON.FromJSON Home
 type HomeMap = Map HomeId Home
 
-
 data ZEvent = Init HomeMap
             | HomeAdded Home
             | DeviceAdded HomeId Device
@@ -150,7 +145,7 @@ type API =  "state"  :> WebSocketConduit () HomeMap
 --TODO: improve nested API
 --  https://haskell-servant.readthedocs.io/en/stable/tutorial/Server.html#nested-apis
 
-type ConduitClient i o = Conduit i (ResourceT IO) o
+type ConduitClient i o = ConduitT i o (ResourceT IO) ()
 
 class (RunClient m) => RunWebSocketClient m where
   webSocketRequest
@@ -213,7 +208,13 @@ setValueString
 setValueString c h d v = setValue c h d v . FromString
 
 setValueState
-  :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+  :: Monad m
+  => Client m API
+  -> HomeId
+  -> DeviceId
+  -> ValueId
+  -> ValueState
+  -> m ()
 setValueState c h d v = setValue c h d v . FromState
 
 setValue
@@ -251,10 +252,12 @@ instance Monad m => MonadZWave (ClientT m) where
   zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s
   zGetSnapshot = ClientT $ ReaderT getSnapshot
 
-zSetValueString :: MonadZWave m => HomeId -> DeviceId -> ValueId -> String -> m ()
+zSetValueString
+  :: MonadZWave m => HomeId -> DeviceId -> ValueId -> String -> m ()
 zSetValueString h d v = zSetValue h d v . FromString
 
-zSetValueState :: MonadZWave m => HomeId -> DeviceId -> ValueId -> ValueState -> m ()
+zSetValueState
+  :: MonadZWave m => HomeId -> DeviceId -> ValueId -> ValueState -> m ()
 zSetValueState h d v = zSetValue h d v . FromState
 
 withZWaveClient :: ClientEnv -> ClientT IO a -> IO a

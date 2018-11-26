@@ -16,8 +16,6 @@ import           Control.Concurrent.Async       ( race_ )
 import           Control.Monad                  ( void )
 
 import qualified Data.Conduit.Combinators      as Conduit
-import qualified Data.Map.Merge.Strict         as Map
-import           Data.Map.Strict                ( Map )
 
 import           Reactive.Banana
 import           Reactive.Banana.Frameworks
