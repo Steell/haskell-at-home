@@ -12,7 +12,6 @@ module ReactiveDaemon where
 
 import           Api
 
-import           Control.Arrow
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Reader
@@ -29,6 +28,9 @@ import           Reactive.Banana.Frameworks
 import           Servant.Client                 ( Client )
 
 ----
+
+makeLenses ''Home
+makePrisms ''ZEvent
 
 data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
   deriving (Eq)
@@ -74,6 +76,7 @@ makeLenses ''ZWaveHome
 data ZWData = ZWData { _zwMap     :: Behavior HomeMap
                      , _zwChanges :: Event ZEvent
                      , _zwSetValue   :: HomeId -> DeviceId -> ValueId -> ValueState -> IO ()
+                     , _zwHome :: Behavior (Maybe HomeId)
                      -- , _zwdCurrentTime :: Behavior Clock.UTCTime
                      }
 makeClassy ''ZWData
@@ -117,12 +120,17 @@ dNetwork client cfg stateHandler evtHandler = do
   zd     <- zwData client eState eEvt
   flip runReaderT zd $ unzwio cfg
 
+mapMaybe :: (a -> Maybe b) -> Event a -> Event b
+mapMaybe f = filterJust . fmap f
+
 zwData
   :: MonadMoment m => Client IO API -> Event HomeMap -> Event ZEvent -> m ZWData
 zwData client eState events = do
   let setValue' = setValueState client
   bHomeMap <- stepper Map.empty eState
-  return $ ZWData bHomeMap events setValue'
+  bHomeId  <-
+    stepper Nothing $ Just <$> mapMaybe (preview $ _HomeAdded . homeId) events
+  return $ ZWData bHomeMap events setValue' bHomeId
 
 getValue :: ZWaveValue -> Behavior (Maybe ValueState)
 getValue ZWaveValue {..} = fmap (_valueState . _vInfo) <$> _zwvInfo
@@ -165,26 +173,33 @@ setValueOnEvent events ZWaveValue {..} = do
       <> show (_valueState _vInfo)
       <> " }"
 
-getHomeById :: Monad m => HomeId -> ZWave m ZWaveHome
-getHomeById h = do
+getHome :: Monad m => ZWave m ZWaveHome
+getHome = do
   bHomeMap <- view zwMap
   eChange  <- view zwChanges
-  let changes = observeE . filterJust $ toHomeEvent bHomeMap <$> eChange
-  return ZWaveHome {_zwhInfo = Map.lookup h <$> bHomeMap, _zwhChanges = changes}
+  bHomeId  <- view zwHome
+  let changes =
+        filterJust
+          $   maybe (const . const Nothing) toHomeEvent
+          <$> bHomeId
+          <*> bHomeMap
+          <@> eChange
+  return ZWaveHome
+    { _zwhInfo    = maybe (const Nothing) Map.lookup <$> bHomeId <*> bHomeMap
+    , _zwhChanges = changes
+    }
  where
-  toHomeEvent :: Behavior HomeMap -> ZEvent -> Maybe (Moment HomeEvent)
-  toHomeEvent bHomeMap = go
+  toHomeEvent :: HomeId -> HomeMap -> ZEvent -> Maybe HomeEvent
+  toHomeEvent h hmap = go
    where
-    go (DeviceAdded h' d) | h == h' =
-      Just . return . HDeviceAdded $ DeviceInfo d h
-    go (DeviceRemoved h' d) | h == h'       = Just . return $ HDeviceRemoved d
-    go (ValueAdded h' deviceId v) | h == h' = Just $ do
-      Just d <-
-        valueB bHomeMap
-          <&> (Map.lookup h' >=> _homeDevices >>> Map.lookup deviceId)
+    go (DeviceAdded h' d) | h == h' = Just . HDeviceAdded $ DeviceInfo d h
+    go (DeviceRemoved h' d) | h == h' = Just $ HDeviceRemoved d
+    go (ValueAdded h' deviceId v) | h == h' = do
+      home <- Map.lookup h' hmap
+      d    <- Map.lookup deviceId $ _homeDevices home
       return . HValueAdded deviceId . ValueInfo v $ DeviceInfo d h
-    go (ValueRemoved h' d v) | h == h' = Just . return $ HValueRemoved d v
-    go (ValueChanged h' d v s) | h == h' = Just . return $ HValueChanged d v s
+    go (ValueRemoved h' d v) | h == h' = Just $ HValueRemoved d v
+    go (ValueChanged h' d v s) | h == h' = Just $ HValueChanged d v s
     go _                               = Nothing
 
 getDeviceById :: ZWaveHome -> DeviceId -> ZWaveDevice

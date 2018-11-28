@@ -55,7 +55,7 @@ data DoorState = Open | Closed
 
 myconfig :: [String] -> ZWave MomentIO ()
 myconfig phoneNumbers = do
-    home <- getHomeById 660018 --TODO: apparently this is not stable?
+    home <- getHome
 
     singleDimmerCfg home guestroom
     singleDimmerCfg home diningroom
@@ -70,12 +70,15 @@ myconfig phoneNumbers = do
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
     guestroom       = 2 --("guest bedroom / office", [("all", 2)])
-    bedroom@[bedroomFront, bedroomKellie, bedroomSteve] = [6 .. 8]
+    bedroom -- @[bedroomFront, bedroomKellie, bedroomSteve] 
+        = [6 .. 8]
     diningroom      = 9 -- ("dining room", [("all", 9)])
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
-    basement@[basementStairs, basementSeating, basementConsole] = [12 .. 14]
-    all             = livingroom ++ bedroom ++ [diningroom]
+    basement -- @[basementStairs, basementSeating, basementConsole, leftSpeaker, rightSpeaker]
+        = [12 .. 14] --16]
+    energyMeter = 17
+    all         = livingroom ++ bedroom ++ [diningroom]
 
 entranceCfg :: ZWaveHome -> DeviceId -> [DeviceId] -> ZWave MomentIO ()
 entranceCfg home entry lights = do
@@ -178,8 +181,7 @@ singleDimmerCfg home d = do
         handlerB :: Behavior (Scene -> Maybe Integer)
         handlerB = handler <$> getValue levelV
           where
-            handler mv s =
-                mv ^? _Just . _VByte . to (handleScene s) . _Just
+            handler mv s = mv ^? _Just . _VByte . to (handleScene s) . _Just
 
         newLevelEvt :: Event (ZEventSource ValueState)
         newLevelEvt =

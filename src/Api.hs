@@ -46,7 +46,7 @@ type HomeId = Integer
 type DeviceId = Integer
 type ValueId = Integer
 
--- TODO: preserve types and do convertion to/from in to/from JSON
+-- TODO: preserve types and do convertions in [To|From]JSON
 data ValueState = VBool Bool
                 | VByte Integer
                 | VDecimal Float
@@ -79,7 +79,7 @@ convertToZWaveValue (VBool    b) = Z.VTBool b
 convertToZWaveValue (VByte    i) = Z.VTByte $ fromInteger i
 convertToZWaveValue (VDecimal f) = Z.VTDecimal f
 convertToZWaveValue (VInt     i) = Z.VTInt i
-convertToZWaveValue (VList i l ) = Z.VTList i l
+convertToZWaveValue (VList i l)  = Z.VTList i l
 convertToZWaveValue VSchedule    = Z.VTSchedule
 convertToZWaveValue (VShort  i)  = Z.VTShort $ fromInteger i
 convertToZWaveValue (VString t)  = Z.VTString $ Text.unpack t
