@@ -20,6 +20,7 @@ import           Data.Foldable                  ( find
                                                 , traverse_
                                                 )
 import qualified Data.Map.Strict               as Map
+import           Data.Maybe                     ( listToMaybe )
 import qualified Data.Text                     as Text
 
 import           Reactive.Banana
@@ -28,9 +29,6 @@ import           Reactive.Banana.Frameworks
 import           Servant.Client                 ( Client )
 
 ----
-
-makeLenses ''Home
-makePrisms ''ZEvent
 
 data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
   deriving (Eq)
@@ -128,8 +126,8 @@ zwData
 zwData client eState events = do
   let setValue' = setValueState client
   bHomeMap <- stepper Map.empty eState
-  bHomeId  <-
-    stepper Nothing $ Just <$> mapMaybe (preview $ _HomeAdded . homeId) events
+  let homeIdE = fmap fst . listToMaybe . Map.toList <$> eState
+  bHomeId <- stepper Nothing homeIdE
   return $ ZWData bHomeMap events setValue' bHomeId
 
 getValue :: ZWaveValue -> Behavior (Maybe ValueState)
