@@ -10,6 +10,7 @@ import           Client
 import           Control.Arrow
 import           Control.Lens
 import           Control.Monad
+import           Control.Monad.IO.Class         ( liftIO )
 import           Control.Monad.Trans            ( lift )
 
 import qualified Data.List                     as List
@@ -30,6 +31,7 @@ import qualified Network.Mail.SMTP             as SMTP
 
 import           Reactive.Banana
 import           Reactive.Banana.Frameworks     ( MomentIO
+                                                , execute
                                                 , fromPoll
                                                 , reactimate
                                                 )
@@ -70,41 +72,59 @@ myconfig phoneNumbers = do
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
     guestroom       = 2 --("guest bedroom / office", [("all", 2)])
-    bedroom -- @[bedroomFront, bedroomKellie, bedroomSteve] 
-        = [6 .. 8]
+    bedroom         = [6 .. 8] -- @[bedroomFront, bedroomKellie, bedroomSteve] 
     diningroom      = 9 -- ("dining room", [("all", 9)])
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
-    basement -- @[basementStairs, basementSeating, basementConsole, leftSpeaker, rightSpeaker]
-        = [12 .. 14] --16]
-    energyMeter = 17
-    all         = livingroom ++ bedroom ++ [diningroom]
+    basement        = [12 .. 14] -- @[basementStairs, basementSeating, basementConsole, leftSpeaker, rightSpeaker] --16]
+    energyMeter     = 17
+    all             = livingroom ++ bedroom ++ [diningroom]
 
 entranceCfg :: ZWaveHome -> DeviceId -> [DeviceId] -> ZWave MomentIO ()
 entranceCfg home entry lights = do
     let entryDevice = getDeviceById home entry
         lightDevs =
             getDeviceValueByName "Level" . getDeviceById home <$> lights
-        doorE = getDoorEvent entryDevice
-
-    isDaytime <- lift isSunOutB
-    let newLevelEvt =
-            unlessE isDaytime . filterJust $ traverse toLevel <$> doorE
+        doorE     = getDoorEvent entryDevice
+        newLevelE = filterJust $ traverse toLevel <$> doorE
         toLevel Closed = Nothing
         toLevel Open   = Just 0xFF -- last setting
 
-    (fmap VByte <$> newLevelEvt) ~$> lightDevs
+    currentTime <- lift $ fromPoll getCurrentTime
+    nightEvents <- lift $ unlessE isSunOut currentTime "isDaytime: " newLevelE
+    (fmap VByte <$> nightEvents) ~$> lightDevs
 
-unlessE :: Behavior Bool -> Event a -> Event a
-unlessE = whenE . fmap not
+-- unlessE :: Behavior Bool -> Event a -> Event a
+-- unlessE = whenE . fmap not
+unlessE
+    :: (Show a, Show b)
+    => (b -> Bool)
+    -> Behavior b
+    -> String
+    -> Event (ZEventSource a)
+    -> MomentIO (Event (ZEventSource a))
+unlessE f b reason evt = fmap filterJust . execute $ evt <&> \e -> do
+    b' <- valueB b
+    if f b'
+        then do
+            liftIO
+                .  putStrLn
+                $  "(SUPPRESS) "
+                ++ show e
+                ++ " :: "
+                ++ reason
+                ++ show b'
+            return Nothing
+        else return $ Just e
 
 isSunOutB :: MomentIO (Behavior Bool)
-isSunOutB = fromPoll getCurrentTime <&> fmap isSunOut
-  where
-    isSunOut (UTCTime day time) =
-        let (UTCTime _ morning) = sunrise day 42.458429 (-71.066163)
-            (UTCTime _ evening) = sunset day 42.458429 (-71.066163)
-        in  time >= morning && time <= evening
+isSunOutB = fromPoll $ isSunOut <$> getCurrentTime
+
+isSunOut :: UTCTime -> Bool
+isSunOut (UTCTime day time) =
+    let (UTCTime _ morning) = sunrise day 42.458429 (-71.066163)
+        (UTCTime _ evening) = sunset day 42.458429 (-71.066163)
+    in  time >= morning && time <= evening
 
 dimmerCfg
     :: ZWaveHome

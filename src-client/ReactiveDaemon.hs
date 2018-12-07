@@ -88,8 +88,10 @@ instance MonadMoment m => MonadMoment (ZWave m) where
 data ZEventSource a = ZEventSource { _eventTag :: String
                                    , _eventData :: a
                                    }
-  deriving (Show)
 makeLenses ''ZEventSource
+
+instance Show a => Show (ZEventSource a) where
+  show ZEventSource {..} = _eventTag <> ": " <> show _eventData
 
 instance Functor ZEventSource where
   fmap f es = es { _eventData = f (_eventData es) }
@@ -157,11 +159,9 @@ setValueOnEvent events ZWaveValue {..} = do
                       (_eventData event)
   lift $ reactimate $ getSetter <$> _zwvInfo <@> events
  where
-  log ValueInfo {..} ZEventSource {..} =
+  log ValueInfo {..} e =
     putStrLn
-      $  _eventTag
-      <> ": "
-      <> show _eventData
+      $  show e
       <> " => "
       <> "{ device: "
       <> Text.unpack (_deviceName $ _dInfo _vDeviceInfo)
