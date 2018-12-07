@@ -15,6 +15,7 @@ import           Api                     hiding ( getValue
 import           Control.Monad.Reader
 import           Control.Monad.IO.Class         ( MonadIO )
 
+import           Data.Foldable                  ( traverse_ )
 import qualified Data.Map                      as Map
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as Text
@@ -79,15 +80,13 @@ listDevices homeId = do
     liftIO
         .   withZWaveClient env
         $   liftIO
-        .   print
-        .   fmap unlines
+        .   traverse_ printDevices
         =<< fmap extractDeviceList zGetSnapshot
   where
-    extractDeviceList :: HomeMap -> Maybe [String]
-    extractDeviceList =
-        fmap showDevice . Map.elems . _homeDevices <$< Map.lookup homeId
-
-    showDevice :: Device -> String
+    extractDeviceList = _homeDevices <$< Map.lookup homeId
+    printDevices      = putStrLn . showDeviceMap
+    showDeviceMap     = showDeviceList . Map.elems
+    showDeviceList    = unlines . fmap showDevice
     showDevice Device { _deviceId = did, _deviceName = dName, _deviceManufacturer = dMan, _deviceProductName = dpName, _deviceProductType = dpType }
         = "{ id="
             <> show did
@@ -106,7 +105,7 @@ listValues homeId deviceId = do
     liftIO
         .   withZWaveClient env
         $   liftIO
-        .   print
+        .   traverse_ printValues
         =<< fmap extractValueList zGetSnapshot
   where
     extractValueList =
@@ -114,6 +113,15 @@ listValues homeId deviceId = do
             .   Map.lookup deviceId
             .   _homeDevices
             <=< Map.lookup homeId
+    printValues vMap = putStrLn $ showValueMap vMap
+    showValueMap  = showValueList . Map.elems
+    showValueList = unlines . fmap showValue
+    showValue Value { _valueId, _valueName, _valueState } =
+        Text.unpack _valueName
+            ++ " ("
+            ++ show _valueId
+            ++ "): "
+            ++ show _valueState
 
 getValue :: MonadAction m => HomeId -> DeviceId -> ValueId -> m ()
 getValue homeId deviceId valueId = do
