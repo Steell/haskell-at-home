@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main where
 
@@ -67,7 +68,7 @@ myconfig phoneNumbers = do
     entranceCfg home frontDoorSensor [livingroomEntry]
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
-    washerCfg addrs home washerOutlet
+    washerCfg addrs home [washerOutlet, dryerOutlet]
   where
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
@@ -78,6 +79,7 @@ myconfig phoneNumbers = do
     frontDoorSensor = 11 -- ("front door", 11)
     basement        = [12 .. 14] -- @[basementStairs, basementSeating, basementConsole, leftSpeaker, rightSpeaker] --16]
     energyMeter     = 17
+    dryerOutlet     = 18
     all             = livingroom ++ bedroom ++ [diningroom]
 
 entranceCfg :: ZWaveHome -> DeviceId -> [DeviceId] -> ZWave MomentIO ()
@@ -217,15 +219,39 @@ singleDimmerCfg home d = do
     handleScene DoubleDown _ = Just 0    -- off
     handleScene TripleDown _ = Just 0
 
-washerCfg :: [SMTP.Address] -> ZWaveHome -> DeviceId -> ZWave MomentIO ()
-washerCfg addrs home d = do
-    let device = getDeviceById home d
-        powerV = getDeviceValueByName "Power" device
-        powerE = (^?! eventData . _VDecimal) <$> valueChanges powerV
-        reactToChange old new = when (old > 0 && new < 0.5) $ sendEmail addrs
+data WashState = Active | Inactive
 
-    powerB <- stepper 0 powerE
-    lift . reactimate $ (powerB <&> reactToChange) <@> powerE
+washerCfg :: [SMTP.Address] -> ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
+washerCfg addrs home ds = do
+    let reactToChange Active Inactive = sendEmail addrs
+        reactToChange _      _        = return ()
+
+        -- TODO: this is a monoid...
+        state' x = if x > 0.0 then Active else Inactive
+        state :: [Float] -> WashState
+        state lvls = if any (> 0.0) lvls then Active else Inactive
+        stateMappend Active _      = Active
+        stateMappend _      Active = Active
+        stateMappend _      _      = Inactive
+
+        powerEvt :: DeviceId -> (DeviceId, Event Float)
+        powerEvt d =
+            ( d
+            , fmap (^?! eventData . _VDecimal)
+                . valueChanges
+                . getDeviceValueByName "Power"
+                $ getDeviceById home d
+            )
+
+        powerEvts :: [(DeviceId, Event Float)]
+        powerEvts = powerEvt <$> ds
+
+        stateEvts :: [Event WashState]
+        stateEvts = fmap (\(_, e) -> state' <$> e) powerEvts
+
+    stateMapB <- accumB Map.empty (unions ((\(d, v) -> Map.insert d <$> v) <$> powerEvts))
+    let stateB = reactToChange . state . Map.elems <$> stateMapB
+    lift . reactimate . apply stateB $ mergeE stateMappend stateEvts
 
 sendEmail :: [SMTP.Address] -> IO ()
 sendEmail to = SMTP.renderSendMail mail
