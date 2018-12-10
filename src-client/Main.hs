@@ -10,7 +10,6 @@ import           Client
 
 import           Control.Arrow
 import           Control.Lens
-import           Control.Monad
 import           Control.Monad.IO.Class         ( liftIO )
 import           Control.Monad.Trans            ( lift )
 
@@ -226,38 +225,33 @@ washerCfg addrs home ds = do
     let reactToChange Active Inactive = sendEmail addrs
         reactToChange _      _        = return ()
 
-        -- TODO: this is a monoid...
-        state' x = if x > 0.0 then Active else Inactive
         state :: [Float] -> WashState
-        state lvls = if any (> 0.0) lvls then Active else Inactive
-        stateMappend Active _      = Active
-        stateMappend _      Active = Active
-        stateMappend _      _      = Inactive
+        state lvls = if any (> 2.0) lvls then Active else Inactive
 
-        powerEvt :: DeviceId -> (DeviceId, Event Float)
+        powerEvt :: DeviceId -> Event (Map DeviceId Float -> Map DeviceId Float)
         powerEvt d =
-            ( d
-            , fmap (^?! eventData . _VDecimal)
-                . valueChanges
-                . getDeviceValueByName "Power"
-                $ getDeviceById home d
-            )
+            Map.insert d
+                <$> ( fmap (^?! eventData . _VDecimal)
+                    . valueChanges
+                    . getDeviceValueByName "Power"
+                    $ getDeviceById home d
+                    )
 
-        powerEvts :: [(DeviceId, Event Float)]
-        powerEvts = powerEvt <$> ds
+        updateState new (_, old) = (old, new)
 
-        stateEvts :: [Event WashState]
-        stateEvts = fmap (\(_, e) -> state' <$> e) powerEvts
-
-    stateMapB <- accumB Map.empty (unions ((\(d, v) -> Map.insert d <$> v) <$> powerEvts))
-    let stateB = reactToChange . state . Map.elems <$> stateMapB
-    lift . reactimate . apply stateB $ mergeE stateMappend stateEvts
+    stateMapE    <- accumE Map.empty . unions $ powerEvt <$> ds
+    stateChangeE <-
+        accumE (Inactive, Inactive)
+        $   updateState
+        .   state
+        .   Map.elems
+        <$> stateMapE
+    lift . reactimate $ uncurry reactToChange <$> stateChangeE
 
 sendEmail :: [SMTP.Address] -> IO ()
 sendEmail to = SMTP.renderSendMail mail
   where
-    mail = SMTP.simpleMail from to [] [] subject [SMTP.plainTextPart msg]
-    from =
-        SMTP.Address (Just "Washing Machine") "washer@melrose.steellworks.com"
-    subject = "The washing machine has finished"
-    msg     = "You may now move your clothes to the dryer"
+    mail    = SMTP.simpleMail from to [] [] subject [SMTP.plainTextPart msg]
+    from = SMTP.Address (Just "Laundry Room") "washer@melrose.steellworks.com"
+    subject = "The laundry has finished"
+    msg     = "Move your ass and go get it"

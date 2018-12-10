@@ -46,7 +46,8 @@ type HomeId = Integer
 type DeviceId = Integer
 type ValueId = Integer
 
--- TODO: preserve types and do convertions in [To|From]JSON
+-- TODO: use Z.ValueData and do convertions in [To|From]JSON
+--       rather than operate on these in the client
 data ValueState = VBool Bool
                 | VByte Integer
                 | VDecimal Float
