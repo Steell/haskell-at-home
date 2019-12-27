@@ -67,7 +67,7 @@ myconfig phoneNumbers = do
     entranceCfg home frontDoorSensor [livingroomEntry]
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
-    washerCfg addrs home [washerOutlet, dryerOutlet]
+    washerCfg addrs home [(washerOutlet, 5.0), (dryerOutlet, 50.0)]
   where
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
@@ -220,18 +220,29 @@ singleDimmerCfg home d = do
 
 data WashState = Active | Inactive
 
-washerCfg :: [SMTP.Address] -> ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
+washerCfg :: [SMTP.Address] -> ZWaveHome -> [(DeviceId, Float)] -> ZWave MomentIO ()
 washerCfg addrs home ds = do
-    let reactToChange Active Inactive = sendEmail addrs
+    let reactToChange (os, Active) (ns, Inactive) = do
+            putStrLn ("WASH COMPLETE: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
+    	    sendEmail addrs
+        reactToChange (os, Inactive) (ns, Active) =
+	    putStrLn ("WASH STARTED: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
         reactToChange _      _        = return ()
 
-        state :: [Float] -> WashState
-        state lvls = if any (> 2.0) lvls then Active else Inactive
+	merge :: Map DeviceId Float -> Map DeviceId Float -> Map DeviceId String
+	merge = Map.intersectionWith (\o n -> show o ++ " ==> " ++ show n)
 
-        powerEvt :: DeviceId -> Event (Map DeviceId Float -> Map DeviceId Float)
-        powerEvt d =
+        state :: [Float] -> WashState
+        state lvls = if any (> 50.0) lvls then Active else Inactive
+
+	state2 :: Float -> Float -> WashState
+	state2 threshold lvl | threshold < lvl = Active
+	       		     | otherwise       = Inactive
+
+        powerEvt :: (DeviceId, Float) -> Event (Map DeviceId (Float, Float) -> Map DeviceId (Float, Float))
+        powerEvt (d, t) =
             Map.insert d
-                <$> ( fmap (^?! eventData . _VDecimal)
+                <$> ( fmap (\x -> (t, x ^?! eventData . _VDecimal))
                     . valueChanges
                     . getDeviceValueByName "Power"
                     $ getDeviceById home d
@@ -239,12 +250,18 @@ washerCfg addrs home ds = do
 
         updateState new (_, old) = (old, new)
 
+        -- TODO: Monoid
+	reduce :: ([a], WashState) -> (a, WashState) -> ([a], WashState)
+	reduce (is, Inactive) (i, Inactive) = ((i:is), Inactive)
+	reduce (is, _)        (i, _)        = ((i:is), Active)
+
     stateMapE    <- accumE Map.empty . unions $ powerEvt <$> ds
     stateChangeE <-
-        accumE (Inactive, Inactive)
+        accumE (([], Inactive), ([], Inactive))
         $   updateState
-        .   state
-        .   Map.elems
+	.   List.foldl' reduce ([], Inactive)
+        .   fmap (\(d, vs@(_,v)) -> ((d, v), uncurry state2 vs))
+        .   Map.toList
         <$> stateMapE
     lift . reactimate $ uncurry reactToChange <$> stateChangeE
 
