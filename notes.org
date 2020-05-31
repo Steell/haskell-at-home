@@ -1,49 +1,61 @@
+* Tasks
+
+** TODO Fork hoppy
+
+*** Why does hoppy-generator need to be a separate executable?
+
+    Cabal new-build
+
 * haskell-at-home: a blog
 
 ** Part 0: Getting setup
 
 *** Nix
 
-    Nix is sweet. I can waste time here explaining everything it does, but
-    there are many other evangelists on the internet that can do that better
-    than me.
+    Nix is sweet. I can waste time here explaining everything it does,
+    but there are many other evangelists on the internet that can do
+    that better than me.
 
-    All you need to know is that, regardless of how your system is currently
-    configured, this is how we want to be able to build our project:
-    1 Install Nix
-    2 Clone git repo
-    3 `nix build`
+    All you need to know is that, regardless of how your system is
+    currently configured, this is how we want to be able to build our
+    project:
 
-    And when I say regardless, I mean independent of OS, CPU architecture,
-    whatever libs you have installed, etc. This is because Nix knows the full
-    set of requirements to build our program, and can build all of these
-    dependencies locally if necessary in order to satisfy the build.
+    1. Install Nix
+    2. Clone git repo
+    3. `nix build`
+
+    And when I say regardless, I mean independent of OS, CPU
+    architecture, whatever libs you have installed, etc. This is
+    because Nix knows the full set of requirements to build our
+    program, and can build all of these dependencies locally if
+    necessary in order to satisfy the build.
 
 *** Configuration for building
 
 **** default.nix
 
      If no argument is specified to `nix build`, *default.nix* will be
-     used. This file evaluates to a nix expression. Nix requires a /derivation/
-     in order to perform a build.
+     used. This file evaluates to a nix expression. Nix requires a
+     /derivation/ in order to perform a build.
 
-     We could simply define a derivation, but ideally we paramaterize the
-     derivation to account for different possible configurations.
+     We could simply define a derivation, but ideally we paramaterize
+     the derivation to account for different possible configurations.
 
-     To do this, we define a function which accepts configuration parameters,
-     and returns the derivation. We can provide sensible default arguments for
-     this function.
+     To do this, we define a function which accepts configuration
+     parameters, and returns the derivation. We can provide sensible
+     default arguments for this function.
 
 *** TODO Configuration for development
 
 **** nix shell
 
-     Nix shell can be used to drop us into a shell where all dependencies
-     required to build our project have been added to the environment. Once in
-     this environment, we can launch our editor of choice and have access to all
-     these dependencies while developing our program.
+     Nix shell can be used to drop us into a shell where all
+     dependencies required to build our project have been added to the
+     environment. Once in this environment, we can launch our editor
+     of choice and have access to all these dependencies while
+     developing our program.
 
 **** Refactor our nix configurations
 
-     We want our dependencies to be shared between our build file and our
-     development file.
+     We want our dependencies to be shared between our build file and
+     our development file.

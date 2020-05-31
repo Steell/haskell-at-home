@@ -1,0 +1,9 @@
+let
+  hostNix = import <nixpkgs> {};
+  nixpkgsPin = hostNix.pkgs.lib.importJSON ./nixpkgs-pin.json;
+in
+  hostNix.pkgs.fetchFromGitHub {
+    owner = "NixOS";
+    repo = "nixpkgs-channels";
+    inherit (nixpkgsPin) rev sha256;
+  }

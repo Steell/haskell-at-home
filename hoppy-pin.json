@@ -1,0 +1,10 @@
+{
+  "url": "https://gitlab.com/khumba/hoppy.git",
+  "rev": "9f35411cc3601966a5f69437d771383aa037ae41",
+  "date": "2020-04-26T19:45:30-07:00",
+  "path": "/nix/store/0zy1pijmygpjyzvcvgwhvaigvm2agmz6-hoppy",
+  "sha256": "0v899f0qqsh8p1gjr2blvjrrbsavmp1xzzk4nj9h3y6ak9h4jiwr",
+  "fetchSubmodules": false,
+  "deepClone": false,
+  "leaveDotGit": false
+}

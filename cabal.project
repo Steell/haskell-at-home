@@ -1,0 +1,5 @@
+packages:
+        ./
+ --       haskell-openzwave/haskell-openzwave-gen/
+ --       haskell-openzwave/haskell-openzwave/
+ --       haskell-openzwave/haskell-openzwave-cpp/
