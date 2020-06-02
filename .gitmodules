@@ -1,3 +1,3 @@
 [submodule "haskell-openzwave"]
         path = haskell-openzwave
-        url = git@github.com:Steell/haskell-openzwave.git
+        url = https://github.com/Steell/haskell-openzwave.git
