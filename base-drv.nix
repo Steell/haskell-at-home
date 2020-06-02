@@ -14,6 +14,12 @@ let
       };
       hoppy-overlay = import "${hoppy-repo}/nix/overlay.nix";
     in hoppy-overlay self super)
+
+    (self: super: {
+      openzwave = self.callPackage ./openzwave.nix {
+        inherit (super) openzwave;
+      };
+    })
   ];
 
   nixpkgs = import ./nix/nixpkgs.nix;
