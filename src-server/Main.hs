@@ -30,17 +30,20 @@ import           System.Environment             ( getArgs )
 
 main :: IO ()
 main = do
-    [device]      <- getArgs
-    manager       <- initOzw device
-    emptyState    <- newTVarIO emptyZWaveState
-    stateChan     <- newBroadcastTChanIO
-    eventChan     <- newBroadcastTChanIO
+    [dbPath, device] <- getArgs
+    manager <- initOzw dbPath device
+    emptyState <- newTVarIO emptyZWaveState
+    stateChan <- newBroadcastTChanIO
+    eventChan <- newBroadcastTChanIO
     let env = ServerEnv emptyState manager stateChan eventChan
     hookZWaveNotifications env
     run 8081 $ serverApp env
   where
-    initOzw :: String -> IO OZW.Manager
-    initOzw device = Z.initOzw Z.defaultOptions { Z._driverPath = device }
+    initOzw :: String -> String -> IO OZW.Manager
+    initOzw dbPath device = Z.initOzw Z.defaultOptions {
+      Z._driverPath = device,
+      Z._dbPath = dbPath
+    }
 
     hookZWaveNotifications :: ServerEnv -> IO ()
     hookZWaveNotifications ServerEnv {..} = do
