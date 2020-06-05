@@ -44,6 +44,15 @@ import           System.Environment             ( getArgs )
 
 ----
 
+data SceneButton = Up | Down
+data SceneGesture = DoublePress | TriplePress
+type Scene = (SceneGesture, SceneButton)
+makePrisms ''SceneButton
+makePrisms ''SceneGesture
+
+-- data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
+--   deriving (Eq)
+
 makePrisms ''ValueState
 
 main :: IO ()
@@ -72,7 +81,7 @@ myconfig phoneNumbers = do
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
     guestroom       = 2 --("guest bedroom / office", [("all", 2)])
-    bedroom         = [6 .. 8] -- @[bedroomFront, bedroomKellie, bedroomSteve] 
+    bedroom         = [6 .. 8] -- @[bedroomFront, bedroomKellie, bedroomSteve]
     diningroom      = 9 -- ("dining room", [("all", 9)])
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
@@ -152,17 +161,17 @@ globalCfg :: ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
 globalCfg home ds = dimmerCfg home ds ds toLevel
   where
     toLevel :: Scene -> Maybe Integer
-    toLevel TripleDown = Just 0
-    toLevel _          = Nothing
+    toLevel (TriplePress, Down) = Just 0
+    toLevel _                   = Nothing
 
 multiDimmerCfg :: ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
 multiDimmerCfg home ds = dimmerCfg home ds ds $ toLevel >>> Just
   where
     toLevel :: Scene -> Integer
-    toLevel DoubleUp   = 0xFF
-    toLevel DoubleDown = 0
-    toLevel TripleUp   = 0x63
-    toLevel TripleDown = 0
+    toLevel (DoublePress, Up)   = 0xFF
+    toLevel (DoublePress, Down) = 0
+    toLevel (TriplePress, Up)   = 0x63
+    toLevel (TriplePress, Down) = 0
 
 mergeE :: (b -> b -> b) -> [Event b] -> Event b
 mergeE f = List.foldl' (unionWith f) never
@@ -181,17 +190,22 @@ getDoorEvent d =
 
 getSceneEvent :: ZWaveDevice -> Event (ZEventSource Scene)
 getSceneEvent d =
-    getDeviceValueByName "Scene Number" d
-        & (   valueChanges
-          >$> traverse (preview _VByte)
-          >>> filterJust
-          >$> traverse (flip Map.lookup sceneNumberMap)
-          >>> filterJust
-          )
+  let upEvents = getDeviceValueByName "Scene 1" d
+      downEvents =  getDeviceValueByName "Scene 2" d
+  in
+    unionWith const (extractScene upEvents Up) (extractScene downEvents Down)
   where
-    sceneNumberMap :: Map Integer Scene
-    sceneNumberMap = Map.fromList
-        [(13, DoubleUp), (14, TripleUp), (23, DoubleDown), (24, TripleDown)]
+    extractScene sceneE sceneButton = sceneE
+      & (   valueChanges
+        >$> traverse (preview _VByte)
+        >>> filterJust
+        >$> traverse (flip Map.lookup sceneGestureMap)
+        >>> filterJust
+        >$> fmap (\gesture -> (gesture, sceneButton))
+        )
+
+    sceneGestureMap :: Map Integer SceneGesture
+    sceneGestureMap = Map.fromList [(4, DoublePress), (5, TriplePress)]
 
 singleDimmerCfg :: ZWaveHome -> DeviceId -> ZWave MomentIO ()
 singleDimmerCfg home d = do
@@ -211,12 +225,12 @@ singleDimmerCfg home d = do
     newLevelEvt ~> levelV
   where
     handleScene :: Scene -> Integer -> Maybe Integer
-    handleScene DoubleUp   0 = Just 0xFF -- previous level
-    handleScene TripleUp   0 = Just 0xFF
-    handleScene DoubleUp   _ = Just 0x63 -- max level
-    handleScene TripleUp   _ = Just 0x63 -- max level
-    handleScene DoubleDown _ = Just 0    -- off
-    handleScene TripleDown _ = Just 0
+    handleScene (DoublePress, Up)   0 = Just 0xFF -- previous level
+    handleScene (TriplePress, Up)   0 = Just 0xFF
+    handleScene (DoublePress, Up)   _ = Just 0x63 -- max level
+    handleScene (TriplePress, Up)   _ = Just 0x63 -- max level
+    handleScene (DoublePress, Down) _ = Just 0    -- off
+    handleScene (TriplePress, Down) _ = Just 0
 
 data WashState = Active | Inactive
 
@@ -224,20 +238,20 @@ washerCfg :: [SMTP.Address] -> ZWaveHome -> [(DeviceId, Float)] -> ZWave MomentI
 washerCfg addrs home ds = do
     let reactToChange (os, Active) (ns, Inactive) = do
             putStrLn ("WASH COMPLETE: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
-    	    sendEmail addrs
+            sendEmail addrs
         reactToChange (os, Inactive) (ns, Active) =
-	    putStrLn ("WASH STARTED: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
+            putStrLn ("WASH STARTED: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
         reactToChange _      _        = return ()
 
-	merge :: Map DeviceId Float -> Map DeviceId Float -> Map DeviceId String
-	merge = Map.intersectionWith (\o n -> show o ++ " ==> " ++ show n)
+        merge :: Map DeviceId Float -> Map DeviceId Float -> Map DeviceId String
+        merge = Map.intersectionWith (\o n -> show o ++ " ==> " ++ show n)
 
         state :: [Float] -> WashState
         state lvls = if any (> 50.0) lvls then Active else Inactive
 
-	state2 :: Float -> Float -> WashState
-	state2 threshold lvl | threshold < lvl = Active
-	       		     | otherwise       = Inactive
+        state2 :: Float -> Float -> WashState
+        state2 threshold lvl | threshold < lvl = Active
+                             | otherwise       = Inactive
 
         powerEvt :: (DeviceId, Float) -> Event (Map DeviceId (Float, Float) -> Map DeviceId (Float, Float))
         powerEvt (d, t) =
@@ -251,15 +265,15 @@ washerCfg addrs home ds = do
         updateState new (_, old) = (old, new)
 
         -- TODO: Monoid
-	reduce :: ([a], WashState) -> (a, WashState) -> ([a], WashState)
-	reduce (is, Inactive) (i, Inactive) = ((i:is), Inactive)
-	reduce (is, _)        (i, _)        = ((i:is), Active)
+        reduce :: ([a], WashState) -> (a, WashState) -> ([a], WashState)
+        reduce (is, Inactive) (i, Inactive) = ((i:is), Inactive)
+        reduce (is, _)        (i, _)        = ((i:is), Active)
 
     stateMapE    <- accumE Map.empty . unions $ powerEvt <$> ds
     stateChangeE <-
         accumE (([], Inactive), ([], Inactive))
         $   updateState
-	.   List.foldl' reduce ([], Inactive)
+        .   List.foldl' reduce ([], Inactive)
         .   fmap (\(d, vs@(_,v)) -> ((d, v), uncurry state2 vs))
         .   Map.toList
         <$> stateMapE

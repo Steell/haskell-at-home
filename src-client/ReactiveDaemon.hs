@@ -30,10 +30,6 @@ import           Servant.Client                 ( Client )
 
 ----
 
-data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
-  deriving (Eq)
-makePrisms ''Scene
-
 data DeviceInfo = DeviceInfo { _dInfo :: Device
                              , _dHomeId :: HomeId
                              }
