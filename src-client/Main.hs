@@ -197,14 +197,14 @@ getSceneEvent d =
   where
     extractScene sceneE sceneButton = sceneE
       & (   valueChanges
-        >$> traverse (preview _VByte)
+        >$> traverse (preview (_VList . _1))
         >>> filterJust
         >$> traverse (flip Map.lookup sceneGestureMap)
         >>> filterJust
         >$> fmap (\gesture -> (gesture, sceneButton))
         )
 
-    sceneGestureMap :: Map Integer SceneGesture
+    sceneGestureMap :: Map Int  SceneGesture
     sceneGestureMap = Map.fromList [(4, DoublePress), (5, TriplePress)]
 
 singleDimmerCfg :: ZWaveHome -> DeviceId -> ZWave MomentIO ()
