@@ -2,7 +2,7 @@ let
   nixpkgs = import ./nix/nixpkgs.nix;
   pkgs = import nixpkgs {}; # replace with reference to pinned?
                             # find a better way to share this
-  drv = import ./release.nix; #eventually this would be based of a develop.nix
+  drv = import ./base-drv.nix; #eventually this would be based of a develop.nix
 in drv.shellFor {
   packages = p: with p; [
 #    haskell-openzwave

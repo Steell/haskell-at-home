@@ -1,4 +1,6 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 
@@ -13,6 +15,8 @@ import           Control.Lens
 import           Control.Monad.IO.Class         ( liftIO )
 import           Control.Monad.Trans            ( lift )
 
+import           Data.Foldable                  ( traverse_ )
+import           Data.Functor                   ( void )
 import qualified Data.List                     as List
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
@@ -44,6 +48,8 @@ import           System.Environment             ( getArgs )
 
 ----
 
+makePrisms ''ValueState
+
 data SceneButton = Up | Down
 data SceneGesture = DoublePress | TriplePress
 type Scene = (SceneGesture, SceneButton)
@@ -53,7 +59,9 @@ makePrisms ''SceneGesture
 -- data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
 --   deriving (Eq)
 
-makePrisms ''ValueState
+data Light = Light { _applyScene :: Behavior (Scene -> IO ())
+                   , _device :: ZWaveDevice
+                   }
 
 main :: IO ()
 main = do
@@ -67,6 +75,13 @@ data DoorState = Open | Closed
 myconfig :: [String] -> ZWave MomentIO ()
 myconfig phoneNumbers = do
     home <- getHome
+
+    let (basementStairsD : basementDimmersD) = getDeviceById home <$> basement
+    basementLights <- sequence $
+      mkSwitchLight basementStairsD
+      : (mkDimmerLight <$> tail basementDimmersD)
+
+    roomLightCfg basementLights basementLights
 
     singleDimmerCfg home guestroom
     singleDimmerCfg home diningroom
@@ -85,7 +100,12 @@ myconfig phoneNumbers = do
     diningroom      = 9 -- ("dining room", [("all", 9)])
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
-    basement        = [12 .. 14] -- @[basementStairs, basementSeating, basementConsole, leftSpeaker, rightSpeaker] --16]
+    basement@(basementStairs : basementDimmers@[ basementSeating
+                                               , basementConsole
+                                               , leftSpeaker
+                                               , rightSpeaker
+                                               ]) =
+      [12 .. 16]
     energyMeter     = 17
     dryerOutlet     = 18
     all             = livingroom ++ bedroom ++ [diningroom]
@@ -135,6 +155,54 @@ isSunOut (UTCTime day time) =
     let (UTCTime _ morning) = sunrise day 42.458429 (-71.066163)
         (UTCTime _ evening) = sunset day 42.458429 (-71.066163)
     in  time >= morning && time <= evening
+
+mkDimmerLight :: Monad m => ZWaveDevice -> ZWave m Light
+mkDimmerLight _device = do
+  setter <- view zwSetValue
+  let _applyScene = applyScene setter
+  return Light {..}
+  where
+    levelVal = getDeviceValueByName "Level" _device
+
+    applyScene setter = _zwvInfo levelVal <&> \case
+      Nothing -> const $ pure ()
+      (Just v@ValueInfo {..}) -> \scene ->
+        void $ setter (_dHomeId _vDeviceInfo)
+          (_deviceId $ _dInfo _vDeviceInfo)
+          (_valueId _vInfo)
+          (VByte $ toLevel scene)
+
+    toLevel :: Scene -> Integer
+    toLevel (DoublePress, Up)   = 0xFF
+    toLevel (DoublePress, Down) = 0
+    toLevel (TriplePress, Up)   = 0x63
+    toLevel (TriplePress, Down) = 0
+
+mkSwitchLight :: Monad m => ZWaveDevice -> ZWave m Light
+mkSwitchLight _device = do
+    setter <- view zwSetValue
+    let _applyScene = applyScene setter
+    return Light {..}
+  where
+    switchVal = getDeviceValueByName "Switch" _device
+
+    applyScene setter = _zwvInfo switchVal <&> \case
+      Nothing -> const $ pure ()
+      (Just v@ValueInfo {..}) -> \scene ->
+        void $ setter (_dHomeId _vDeviceInfo)
+          (_deviceId $ _dInfo _vDeviceInfo)
+          (_valueId _vInfo)
+          (VBool $ toLevel scene)
+
+    toLevel (_, Up) = True
+    toLevel _       = False
+
+roomLightCfg :: [Light] -> [Light] -> ZWave MomentIO ()
+roomLightCfg ins outs = do
+    let sceneE = mergeE const $ fmap (getSceneEvent . _device) ins
+        outCfg :: Light -> Event (IO ())
+        outCfg l = (\f -> f . _eventData) <$> _applyScene l <@> sceneE
+    lift $ traverse_ (reactimate . outCfg) outs
 
 dimmerCfg
     :: ZWaveHome
