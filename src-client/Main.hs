@@ -79,7 +79,7 @@ myconfig phoneNumbers = do
     let (basementStairsD : basementDimmersD) = getDeviceById home <$> basement
     basementLights <- sequence $
       mkSwitchLight basementStairsD
-      : (mkDimmerLight <$> tail basementDimmersD)
+      : (mkDimmerLight <$> basementDimmersD)
 
     roomLightCfg basementLights basementLights
 
