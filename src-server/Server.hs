@@ -28,6 +28,7 @@ import           Control.Monad.Reader           ( ReaderT
                                                 , ask
                                                 )
 
+import           Data.Functor                   ( void )
 import qualified Data.Map.Strict               as Map
 import           Data.Typeable                  ( Proxy(..) )
 
@@ -66,11 +67,12 @@ server :: ServerEnv -> ServerT API AppM
 server env =
   stateBroadcast env
   :<|> eventBroadcast env
-  :<|> healNetwork
+  :<|> heal
   :<|> values
   :<|> snapshot
-  :<|> addDevice
-  :<|> cancelAdd
+  :<|> add
+  :<|> cancel
+  :<|> remove
  where
   values hid did vid = postValue hid did vid :<|> getValue hid did vid
 
@@ -135,11 +137,22 @@ snapshot = do
   ServerEnv {..} <- ask
   fmap _homeMap . liftIO . atomically $ TVar.readTVar _state
 
-addDevice :: HomeId -> Bool -> AppM ()
-addDevice hid secure = liftIO . void $ Z.addNode hid secure
+add :: HomeId -> Bool -> AppM ()
+add hid secure = do
+  ServerEnv {..} <- ask
+  liftIO . void $ Z.addNode _manager (fromInteger hid) secure
 
-cancelAdd :: HomeId -> AppM ()
-cancelAdd hid = liftIO . void $ Z.cancelControllerCommand hid
+cancel :: HomeId -> AppM ()
+cancel hid = do
+  ServerEnv {..} <- ask
+  liftIO . void $ Z.cancelAdd _manager (fromInteger hid)
 
-healNetwork :: HomeId -> Bool -> AppM ()
-healNetwork = liftIO . Z.healNetwork
+heal :: HomeId -> Bool -> AppM ()
+heal h b = do
+  ServerEnv {..} <- ask
+  liftIO $ Z.healNetwork _manager (fromInteger h) b
+
+remove :: HomeId -> AppM ()
+remove h = do
+  ServerEnv {..} <- ask
+  liftIO . void $ Z.manager_RemoveNode _manager (fromInteger h)

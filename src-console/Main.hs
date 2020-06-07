@@ -41,6 +41,7 @@ data Command = ListHomes
              | HealNetwork { homeId :: HomeId, doRR :: Maybe Bool }
              | AddDevice { homeId :: HomeId, secure :: Maybe Bool }
              | CancelAdd { homeId :: HomeId }
+             | RemoveDevice { homeId :: HomeId }
   deriving (Generic, Show)
 instance ParseRecord Command
 
@@ -51,12 +52,14 @@ main = do
     let env    = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
         action = case command of
             ListHomes -> listHomes
-            HealNetwork {..} -> healNetwork homeId $ doRR ?: True
+            HealNetwork {..} -> heal homeId $ doRR ?: True
             ListDevices {..} -> listDevices homeId
             ListValues {..}  -> listValues homeId deviceId
             GetValue {..}    -> getValue homeId deviceId valueId
             SetValue {..}    -> setValue homeId deviceId valueId value
-            AddDevice {..}   -> addDevice homeId $ secure ?: True
+            AddDevice {..}   -> add homeId $ secure ?: True
+            CancelAdd {..}   -> cancel homeId
+            RemoveDevice {..} -> remove homeId
     runReaderT action env
 
 infixl 4 <&>
@@ -82,8 +85,8 @@ listHomes = do
         liftIO $ print ids
     where extractHomeList = fmap show . Map.keys
 
-healNetwork :: MonadAction m => HomeId -> Bool -> m ()
-healNetwork h b = do
+heal :: MonadAction m => HomeId -> Bool -> m ()
+heal h b = do
     env <- ask
     liftIO . withZWaveClient env $ do
       zHealNetwork h b
@@ -159,16 +162,23 @@ setValue homeId deviceId valueId value = do
         zSetValueString homeId deviceId valueId (Text.unpack value)
         liftIO $ putStrLn "OK!"
 
-addDevice :: MonadAction m => HomeId -> Bool -> m ()
-addDevice homeId secure = do
+add :: MonadAction m => HomeId -> Bool -> m ()
+add homeId secure = do
     env <- ask
     liftIO . withZWaveClient env $ do
       zAddDevice homeId secure
       liftIO $ putStrLn "OK!"
 
-cancelAdd :: MonadAction m => HomeId -> m ()
-cancelAdd homeId = do
+cancel :: MonadAction m => HomeId -> m ()
+cancel homeId = do
     env <- ask
     liftIO . withZWaveClient env $ do
       zCancelAdd homeId
       liftIO $ putStrLn "OK!"
+
+remove :: MonadAction m => HomeId -> m ()
+remove h = do
+  env <- ask
+  liftIO . withZWaveClient env $ do
+    zRemoveDevice h
+    liftIO $ putStrLn "OK!"

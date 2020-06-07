@@ -146,6 +146,7 @@ type API =  "state"  :> WebSocketConduit () HomeMap
        -- TODO: make sub-API under Capture "home"
        :<|> "addDevice" :> Capture "home" HomeId :> ReqBody '[JSON] Bool :> Post '[JSON] ()
        :<|> "cancelAdd" :> Capture "home" HomeId :> Post '[JSON] ()
+       :<|> "removeDevice" :> Capture "home" HomeId :> Post '[JSON] ()
 
 --TODO: improve nested API
 --  https://haskell-servant.readthedocs.io/en/stable/tutorial/Server.html#nested-apis
@@ -215,7 +216,10 @@ addDevice :: Monad m => Client m API -> HomeId -> Bool -> m ()
 addDevice (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
 
 cancelAdd :: Monad m => Client m API -> HomeId -> m ()
-cancelAdd (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f) = f
+cancelAdd (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
+
+removeDevice :: Monad m => Client m API -> HomeId -> m ()
+removeDevice (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f) = f
 
 setValueString
   :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
@@ -261,6 +265,7 @@ class Monad m => MonadZWave m where
   zGetSnapshot :: m HomeMap
   zAddDevice :: HomeId -> Bool -> m ()
   zCancelAdd :: HomeId -> m ()
+  zRemoveDevice :: HomeId -> m ()
 
 instance Monad m => MonadZWave (ClientT m) where
   zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
@@ -271,6 +276,7 @@ instance Monad m => MonadZWave (ClientT m) where
   zGetSnapshot = ClientT $ ReaderT getSnapshot
   zAddDevice h s = ClientT $ ReaderT $ \c -> addDevice c h s
   zCancelAdd h = ClientT $ ReaderT $ \c -> cancelAdd c h
+  zRemoveDevice h = ClientT $ ReaderT $ \c -> removeDevice c h
 
 zSetValueString
   :: MonadZWave m => HomeId -> DeviceId -> ValueId -> String -> m ()

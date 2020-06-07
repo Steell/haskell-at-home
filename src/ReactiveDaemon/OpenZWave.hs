@@ -144,7 +144,7 @@ registerNotificationEvent m = addHandler
 
 defaultOptions :: ZWaveOptions
 defaultOptions = ZWaveOptions "/usr/local/etc/openzwave"
-                              "/home/stephen/.openzwave"
+                              "/home/stephen/.openzwave" -- TODO: bad bad bad bad
                               "--ConsoleOutput false"
                               "/dev/ttyACM0" -- "/dev/cu.usbmodem1421"
 
@@ -156,6 +156,15 @@ initOzw ZWaveOptions {..} = do
     unlessM (Z.manager_AddDriver zwManager _driverPath)
         $ fail "could not add driver"
     return zwManager
+
+healNetwork :: Z.Manager -> HomeId -> Bool -> IO ()
+healNetwork = Z.manager_HealNetwork
+
+addNode :: Z.Manager -> HomeId -> Bool -> IO Bool
+addNode = Z.manager_AddNode
+
+cancelAdd :: Z.Manager -> HomeId -> IO Bool
+cancelAdd = Z.manager_CancelControllerCommand
 
 setValue :: Z.Manager -> HomeId -> ValueId -> ValueData -> IO Bool
 setValue m !hid !vid d = do
