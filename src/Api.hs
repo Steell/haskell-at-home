@@ -142,6 +142,9 @@ type API =  "state"  :> WebSocketConduit () HomeMap
          :> (    ReqBody '[JSON] SetValue :> Post '[JSON] ()
             :<|> Get '[JSON] Value)
        :<|> "snapshot" :> Get '[JSON] HomeMap
+       -- TODO: make sub-API under Capture "home"
+       :<|> "addDevice" :> Capture "home" HomeId :> ReqBody '[JSON] Bool :> Post '[JSON] ()
+       :<|> "cancelAdd" :> Capture "home" HomeId :> Post '[JSON] ()
 
 --TODO: improve nested API
 --  https://haskell-servant.readthedocs.io/en/stable/tutorial/Server.html#nested-apis
@@ -202,7 +205,13 @@ handleEvents :: Monad m => Client m API -> ConduitClient ZEvent () -> m ()
 handleEvents (_ :<|> f :<|> _) = f
 
 getSnapshot :: Monad m => Client m API -> m HomeMap
-getSnapshot (_ :<|> _ :<|> _ :<|> f) = f
+getSnapshot (_ :<|> _ :<|> _ :<|> f :<|> _) = f
+
+addDevice :: Monad m => Client m API -> HomeId -> Bool -> m ()
+addDevice (_ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
+
+cancelAdd :: Monad m => Client m API -> HomeId -> m ()
+cancelAdd (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f) = f
 
 setValueString
   :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
@@ -245,6 +254,8 @@ class Monad m => MonadZWave m where
   zSetValue :: HomeId -> DeviceId -> ValueId -> SetValue -> m ()
   zGetValue :: HomeId -> DeviceId -> ValueId -> m Value
   zGetSnapshot :: m HomeMap
+  zAddDevice :: HomeId -> Bool -> m ()
+  zCancelAdd :: HomeId -> m ()
 
 instance Monad m => MonadZWave (ClientT m) where
   zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
@@ -252,6 +263,8 @@ instance Monad m => MonadZWave (ClientT m) where
   zGetValue h d v = ClientT . ReaderT $ \c -> getValue c h d v
   zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s
   zGetSnapshot = ClientT $ ReaderT getSnapshot
+  zAddDevice h s = ClientT $ ReaderT $ \c -> addDevice c h s
+  zCancelAdd h = ClientT $ ReaderT $ \c -> cancelAdd c h
 
 zSetValueString
   :: MonadZWave m => HomeId -> DeviceId -> ValueId -> String -> m ()
@@ -265,13 +278,13 @@ withZWaveClient :: ClientEnv -> ClientT IO a -> IO a
 withZWaveClient env c = flip runReaderT (clientIO env) $ unClientT c
 
 ----- ARCHIVED -----
-{- 
+{-
 data LiftWS a = LiftWS a
   deriving (Typeable, Eq, Show, Functor, Traversable, Foldable, Bounded)
 
 ----------- New Runner Monad
 
-type WsResponse = () --TODO 
+type WsResponse = () --TODO
 
 class (RunWebSocketClient m) => HasWebSocketClient m api where
   type WsClient (m :: * -> *) (api :: *) :: *

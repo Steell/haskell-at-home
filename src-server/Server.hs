@@ -64,7 +64,7 @@ serverApp env = serve serverApi
 
 server :: ServerEnv -> ServerT API AppM
 server env =
-  stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot
+  stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot :<|> addDevice :<|> cancelAdd
  where
   values hid did vid = postValue hid did vid :<|> getValue hid did vid
 
@@ -74,7 +74,7 @@ postValue hid _ vid newVal = do
   ServerEnv {..} <- ask
   let setValue (FromString s) m h v = Z.setValueFromString m h v s
       setValue (FromState s) m h v = Z.setValue m h v (convertToZWaveValue s)
-  success        <- liftIO $ setValue newVal 
+  success        <- liftIO $ setValue newVal
                                       _manager
                                       (fromInteger hid)
                                       (fromInteger vid)
@@ -128,3 +128,9 @@ snapshot :: AppM HomeMap
 snapshot = do
   ServerEnv {..} <- ask
   fmap _homeMap . liftIO . atomically $ TVar.readTVar _state
+
+addDevice :: HomeId -> Bool -> AppM ()
+addDevice hid secure = liftIO . void $ Z.addNode hid secure
+
+cancelAdd :: HomeId -> AppM ()
+cancelAdd hid = liftIO . void $ Z.cancelControllerCommand hid

@@ -34,6 +34,8 @@ data Command = ListHomes
              | GetValue { homeId :: HomeId, deviceId :: DeviceId, valueId :: ValueId}
              | SetValue { homeId :: HomeId, deviceId :: DeviceId, valueId :: ValueId, value :: Text}
              | HealNetwork
+             | AddDevice { homeId :: HomeId, secure :: Maybe Bool }
+             | CancelAdd { homeId :: HomeId }
   deriving (Generic, Show)
 instance ParseRecord Command
 
@@ -51,6 +53,7 @@ main = do
                 getValue homeId deviceId valueId
             SetValue { homeId, deviceId, valueId, value } ->
                 setValue homeId deviceId valueId value
+            AddDevice { homeId, secure } -> addDevice homeId $ secure ?: True
     runReaderT action env
 
 infixl 4 <&>
@@ -60,6 +63,11 @@ infixl 4 <&>
 infixl 4 <$<
 (<$<) :: Functor f => (b -> c) -> (a -> f b) -> a -> f c
 g <$< f = fmap g . f
+
+infixl 3 ?:
+(?:) :: Maybe a -> a -> a
+Nothing ?: a = a
+Just a  ?: _ = a
 
 type MonadAction m = (MonadReader ClientEnv m, MonadIO m)
 
@@ -143,3 +151,17 @@ setValue homeId deviceId valueId value = do
     liftIO . withZWaveClient env $ do
         zSetValueString homeId deviceId valueId (Text.unpack value)
         liftIO $ putStrLn "OK!"
+
+addDevice :: MonadAction m => HomeId -> Bool -> m ()
+addDevice homeId secure = do
+    env <- ask
+    liftIO . withZWaveClient env $ do
+      zAddDevice homeId secure
+      liftIO $ putStrLn "OK!"
+
+cancelAdd :: MonadAction m => HomeId -> m ()
+cancelAdd homeId = do
+    env <- ask
+    liftIO . withZWaveClient env $ do
+      zCancelAdd homeId
+      liftIO $ putStrLn "OK!"
