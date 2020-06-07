@@ -64,7 +64,13 @@ serverApp env = serve serverApi
 
 server :: ServerEnv -> ServerT API AppM
 server env =
-  stateBroadcast env :<|> eventBroadcast env :<|> values :<|> snapshot :<|> addDevice :<|> cancelAdd
+  stateBroadcast env
+  :<|> eventBroadcast env
+  :<|> healNetwork
+  :<|> values
+  :<|> snapshot
+  :<|> addDevice
+  :<|> cancelAdd
  where
   values hid did vid = postValue hid did vid :<|> getValue hid did vid
 
@@ -134,3 +140,6 @@ addDevice hid secure = liftIO . void $ Z.addNode hid secure
 
 cancelAdd :: HomeId -> AppM ()
 cancelAdd hid = liftIO . void $ Z.cancelControllerCommand hid
+
+healNetwork :: HomeId -> Bool -> AppM ()
+healNetwork = liftIO . Z.healNetwork

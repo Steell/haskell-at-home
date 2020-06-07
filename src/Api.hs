@@ -136,6 +136,7 @@ instance JSON.FromJSON SetValue
 
 type API =  "state"  :> WebSocketConduit () HomeMap
        :<|> "events" :> WebSocketConduit () ZEvent
+       :<|> "heal" :> Capture "Home" HomeId :> ReqBody '[JSON] Bool :> Post '[JSON] ()
        :<|> Capture "home" HomeId
          :> Capture "device" DeviceId
          :> Capture "value" ValueId
@@ -204,14 +205,17 @@ handleState (f :<|> _) = f
 handleEvents :: Monad m => Client m API -> ConduitClient ZEvent () -> m ()
 handleEvents (_ :<|> f :<|> _) = f
 
+healNetwork :: Monad m => Client m API -> HomeId -> Bool -> m ()
+healNetwork (_ :<|> _ :<|> f :<|> _) = f
+
 getSnapshot :: Monad m => Client m API -> m HomeMap
-getSnapshot (_ :<|> _ :<|> _ :<|> f :<|> _) = f
+getSnapshot (_ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
 
 addDevice :: Monad m => Client m API -> HomeId -> Bool -> m ()
-addDevice (_ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
+addDevice (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f :<|> _) = f
 
 cancelAdd :: Monad m => Client m API -> HomeId -> m ()
-cancelAdd (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f) = f
+cancelAdd (_ :<|> _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> f) = f
 
 setValueString
   :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> String -> m ()
@@ -235,11 +239,11 @@ setValue
   -> ValueId
   -> SetValue
   -> m ()
-setValue (_ :<|> _ :<|> valueApi :<|> _) h d v = fst (valueApi h d v)
+setValue (_ :<|> _ :<|> _ :<|> valueApi :<|> _) h d v = fst (valueApi h d v)
   where fst (f :<|> _) = f
 
 getValue :: Monad m => Client m API -> HomeId -> DeviceId -> ValueId -> m Value
-getValue (_ :<|> _ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
+getValue (_ :<|> _ :<|> _ :<|> valueApi :<|> _) h d v = snd $ valueApi h d v
   where snd (_ :<|> f) = f
 
 
@@ -251,6 +255,7 @@ newtype ClientT m a = ClientT { unClientT :: ReaderT (Client m API) m a }
 class Monad m => MonadZWave m where
   zHandleState :: ConduitClient HomeMap () -> m ()
   zHandleEvents :: ConduitClient ZEvent () -> m ()
+  zHealNetwork :: HomeId -> Bool -> m ()
   zSetValue :: HomeId -> DeviceId -> ValueId -> SetValue -> m ()
   zGetValue :: HomeId -> DeviceId -> ValueId -> m Value
   zGetSnapshot :: m HomeMap
@@ -260,6 +265,7 @@ class Monad m => MonadZWave m where
 instance Monad m => MonadZWave (ClientT m) where
   zHandleState cc = ClientT . ReaderT $ \c -> handleState c cc
   zHandleEvents cc = ClientT . ReaderT $ \c -> handleEvents c cc
+  zHealNetwork h b = ClientT $ ReaderT $ \c -> healNetwork c h b
   zGetValue h d v = ClientT . ReaderT $ \c -> getValue c h d v
   zSetValue h d v s = ClientT . ReaderT $ \c -> setValue c h d v s
   zGetSnapshot = ClientT $ ReaderT getSnapshot

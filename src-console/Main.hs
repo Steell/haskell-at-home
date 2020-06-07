@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Main where
@@ -31,9 +32,13 @@ import           Servant.Client
 data Command = ListHomes
              | ListDevices { homeId :: HomeId }
              | ListValues { homeId :: HomeId, deviceId :: DeviceId }
-             | GetValue { homeId :: HomeId, deviceId :: DeviceId, valueId :: ValueId}
-             | SetValue { homeId :: HomeId, deviceId :: DeviceId, valueId :: ValueId, value :: Text}
-             | HealNetwork
+             | GetValue { homeId :: HomeId, deviceId :: DeviceId, valueId :: ValueId }
+             | SetValue { homeId :: HomeId
+                        , deviceId :: DeviceId
+                        , valueId :: ValueId
+                        , value :: Text
+                        }
+             | HealNetwork { homeId :: HomeId, doRR :: Maybe Bool }
              | AddDevice { homeId :: HomeId, secure :: Maybe Bool }
              | CancelAdd { homeId :: HomeId }
   deriving (Generic, Show)
@@ -45,15 +50,13 @@ main = do
     mgr     <- newManager defaultManagerSettings
     let env    = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
         action = case command of
-            ListHomes                       -> listHomes
-            HealNetwork                     -> healNetwork
-            ListDevices { homeId }          -> listDevices homeId
-            ListValues { homeId, deviceId } -> listValues homeId deviceId
-            GetValue { homeId, deviceId, valueId } ->
-                getValue homeId deviceId valueId
-            SetValue { homeId, deviceId, valueId, value } ->
-                setValue homeId deviceId valueId value
-            AddDevice { homeId, secure } -> addDevice homeId $ secure ?: True
+            ListHomes -> listHomes
+            HealNetwork {..} -> healNetwork homeId $ doRR ?: True
+            ListDevices {..} -> listDevices homeId
+            ListValues {..}  -> listValues homeId deviceId
+            GetValue {..}    -> getValue homeId deviceId valueId
+            SetValue {..}    -> setValue homeId deviceId valueId value
+            AddDevice {..}   -> addDevice homeId $ secure ?: True
     runReaderT action env
 
 infixl 4 <&>
@@ -79,8 +82,12 @@ listHomes = do
         liftIO $ print ids
     where extractHomeList = fmap show . Map.keys
 
-healNetwork :: MonadAction m => m ()
-healNetwork = error "TODO expose heal api"
+healNetwork :: MonadAction m => HomeId -> Bool -> m ()
+healNetwork h b = do
+    env <- ask
+    liftIO . withZWaveClient env $ do
+      zHealNetwork h b
+      liftIO $ putStrLn "OK!"
 
 listDevices :: MonadAction m => HomeId -> m ()
 listDevices homeId = do
@@ -124,7 +131,7 @@ listValues homeId deviceId = do
     printValues vMap = putStrLn $ showValueMap vMap
     showValueMap  = showValueList . Map.elems
     showValueList = unlines . fmap showValue
-    showValue Value { _valueId, _valueName, _valueState } =
+    showValue Value {..} =
         Text.unpack _valueName
             ++ " ("
             ++ show _valueId
