@@ -11,7 +11,10 @@ in drv.shellFor {
     smarthome
   ];
   withHoogle = true;
-  buildInputs = with pkgs; [ cabal-install openzwave ];
+  buildInputs = with pkgs; [
+    cabal-install
+    haskellPackages.ghcid
+  ];
 }
 
   # .env
