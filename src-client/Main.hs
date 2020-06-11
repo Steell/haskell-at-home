@@ -91,7 +91,9 @@ myconfig phoneNumbers = do
     entranceCfg home frontDoorSensor [livingroomEntry]
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
-    washerCfg addrs home [(washerOutlet, 5.0), (dryerOutlet, 50.0)]
+    washerCfg addrs home [ (washerOutlet, "Electric - W", 5.0)
+                         , (dryerOutlet, "Instance 1: Electric - W", 50.0)
+                         ]
   where
     livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
         [3 .. 5]
@@ -302,7 +304,7 @@ singleDimmerCfg home d = do
 
 data WashState = Active | Inactive
 
-washerCfg :: [SMTP.Address] -> ZWaveHome -> [(DeviceId, Float)] -> ZWave MomentIO ()
+washerCfg :: [SMTP.Address] -> ZWaveHome -> [(DeviceId, String, Float)] -> ZWave MomentIO ()
 washerCfg addrs home ds = do
     let reactToChange (os, Active) (ns, Inactive) = do
             putStrLn ("WASH COMPLETE: " ++ show (merge (Map.fromList os) (Map.fromList ns)))
@@ -321,12 +323,14 @@ washerCfg addrs home ds = do
         state2 threshold lvl | threshold < lvl = Active
                              | otherwise       = Inactive
 
-        powerEvt :: (DeviceId, Float) -> Event (Map DeviceId (Float, Float) -> Map DeviceId (Float, Float))
-        powerEvt (d, t) =
+        powerEvt :: (DeviceId, String, Float)
+                 -> Event (Map DeviceId (Float, Float)
+                 -> Map DeviceId (Float, Float))
+        powerEvt (d, vname, t) =
             Map.insert d
                 <$> ( fmap (\x -> (t, x ^?! eventData . _VDecimal))
                     . valueChanges
-                    . getDeviceValueByName "Power"
+                    . getDeviceValueByName vname
                     $ getDeviceById home d
                     )
 
