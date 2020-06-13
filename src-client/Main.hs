@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -11,6 +12,10 @@ import           Api                     hiding ( getValue )
 import           Client
 
 import           Control.Arrow
+import           Control.Concurrent.AlarmClock  ( AlarmClock
+                                                , setAlarm
+                                                , withAlarmClock
+                                                )
 import           Control.Lens
 import           Control.Monad.IO.Class         ( liftIO )
 import           Control.Monad.Trans            ( lift )
@@ -20,9 +25,23 @@ import           Data.Functor                   ( void )
 import qualified Data.List                     as List
 import           Data.Map.Strict                ( Map )
 import qualified Data.Map.Strict               as Map
+import           Data.Text                     ( Text )
 import qualified Data.Text                     as Text
-import           Data.Time.Clock                ( UTCTime(..)
+import           Data.Time                      ( DayOfWeek(..)
+                                                , LocalTime
+                                                , NominalDiffTime
+                                                , TimeOfDay(..)
+                                                , UTCTime(..)
+                                                , ZonedTime(..)
+                                                , addLocalTime
+                                                , dayOfWeek
+                                                , daysAndTimeOfDayToTime
                                                 , getCurrentTime
+                                                , getTimeZone
+                                                , getZonedTime
+                                                , localDay
+                                                , localTimeToUTC
+                                                , secondsToNominalDiffTime
                                                 )
 import           Data.Time.Horizon              ( sunrise
                                                 , sunset
@@ -34,9 +53,12 @@ import           Network.HTTP.Client            ( newManager
 import qualified Network.Mail.SMTP             as SMTP
 
 import           Reactive.Banana
-import           Reactive.Banana.Frameworks     ( MomentIO
+import           Reactive.Banana.Frameworks     ( AddHandler
+                                                , MomentIO
                                                 , execute
+                                                , fromAddHandler
                                                 , fromPoll
+                                                , newAddHandler
                                                 , reactimate
                                                 )
 
@@ -56,9 +78,6 @@ type Scene = (SceneGesture, SceneButton)
 makePrisms ''SceneButton
 makePrisms ''SceneGesture
 
--- data Scene = DoubleDown | TripleDown | DoubleUp | TripleUp
---   deriving (Eq)
-
 data Light = Light { _applyScene :: Behavior (Scene -> IO ())
                    , _device :: ZWaveDevice
                    }
@@ -67,13 +86,24 @@ main :: IO ()
 main = do
     mgr <- newManager defaultManagerSettings
     let cenv = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
-    phoneNumbers <- getArgs --TODO: make nicer
-    runClient cenv $ myconfig phoneNumbers
+    (code3:phoneNumbers) <- getArgs --TODO: make nicer
+
+    --TODO: somehow incorporate this into myconfig
+    (onStart, triggerAlarmStart) <- newAddHandler
+    (onStop, triggerAlarmStop) <- newAddHandler
+    withAlarmClock (\_ _ -> triggerAlarmStart ()) $ \startAlarm -> do
+      withAlarmClock (\_ _ -> triggerAlarmStop ()) $ \stopAlarm -> do
+        runClient cenv $
+          myconfig phoneNumbers (Text.pack code3) (startAlarm, onStart) (stopAlarm, onStop)
 
 data DoorState = Open | Closed
 
-myconfig :: [String] -> ZWave MomentIO ()
-myconfig phoneNumbers = do
+myconfig :: [String]
+         -> Text
+         -> (AlarmClock UTCTime, AddHandler ())
+         -> (AlarmClock UTCTime, AddHandler ())
+         -> ZWave MomentIO ()
+myconfig phoneNumbers code3 ac1 ac2 = do
     home <- getHome
 
     let (basementStairsD : basementDimmersD) = getDeviceById home <$> basement
@@ -90,35 +120,111 @@ myconfig phoneNumbers = do
     globalCfg home all
     entranceCfg home frontDoorSensor [livingroomEntry]
 
+    lockCodeCfg home frontDoorLock code3 ac1 ac2
+    --batteryEmail addrs frontDoorLock
+
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
     washerCfg addrs home [ (washerOutlet, "Electric - W", 5.0)
                          , (dryerOutlet, "Instance 1: Electric - W", 50.0)
                          ]
   where
-    livingroom@[livingroomEntry, livingroomMantle, livingroomSeating] =
+    livingroom@[livingroomEntry, _, _] = --livingroomMantle, livingroomSeating] =
         [3 .. 5]
     guestroom       = 2 --("guest bedroom / office", [("all", 2)])
     bedroom         = [6 .. 8] -- @[bedroomFront, bedroomKellie, bedroomSteve]
     diningroom      = 9 -- ("dining room", [("all", 9)])
     washerOutlet    = 10 --("washing machine", 10)
     frontDoorSensor = 11 -- ("front door", 11)
-    basement@(basementStairs : basementDimmers@[ basementSeating
+    basement = {-@(basementStairs : basementDimmers@[ basementSeating
                                                , basementConsole
                                                , leftSpeaker
                                                , rightSpeaker
-                                               ]) =
+                                               ]) = -}
       [12 .. 16]
-    energyMeter     = 17
+--    energyMeter     = 17
     dryerOutlet     = 18
+    frontDoorLock   = 21
     all             = livingroom ++ bedroom ++ [diningroom]
+
+lockCodeCfg :: ZWaveHome
+            -> DeviceId
+            -> Text
+            -> (AlarmClock UTCTime, AddHandler ())
+            -> (AlarmClock UTCTime, AddHandler ())
+            -> ZWave MomentIO ()
+lockCodeCfg home lock code3 (startAc, startHandler) (stopAc, stopHandler) = do
+
+  startE <- lift $ fromAddHandler startHandler
+  stopE <- lift $ fromAddHandler stopHandler
+
+  currentZonedTime <- lift $ liftIO getZonedTime
+
+  let schedule :: [(DayOfWeek, TimeOfDay, NominalDiffTime)]
+      schedule = (, TimeOfDay 10 0 0, hoursToNominalDiffTime 6) <$> [Monday, Tuesday, Thursday]
+
+      currentLocalTime = zonedTimeToLocalTime currentZonedTime
+      currentDay       = localDay currentLocalTime
+      currentDayOfWeek = dayOfWeek currentDay
+      currentTimeZone  = zonedTimeZone currentZonedTime
+
+      schedule' = (dropWhile (\(dow, _, _) -> (fromEnum dow) < (fromEnum currentDayOfWeek)) schedule) <> cycle schedule
+
+      getScheduledZonedTime :: (LocalTime, NominalDiffTime)
+                            -> (DayOfWeek, TimeOfDay, NominalDiffTime)
+                            -> (LocalTime, NominalDiffTime)
+      getScheduledZonedTime (prevLocalTime, _) (dow, tod, duration) =
+        let prevDay       = localDay prevLocalTime
+            prevDayOfWeek = dayOfWeek prevDay
+            diffDay       = toInteger $ dowDiff prevDayOfWeek dow
+            nextLocalTime = daysAndTimeOfDayToTime diffDay tod `addLocalTime` prevLocalTime
+        in
+          (nextLocalTime, duration)
+
+      schedule'' = List.scanl' getScheduledZonedTime (currentLocalTime, undefined) schedule'
+      schedule''' = fmap (\(lt, diff) -> (lt, diff `addLocalTime` lt)) schedule''
+
+      startTimes@(start : _) = fmap fst schedule'''
+      endTimes               = undefined : fmap snd schedule'''
+
+  lift $ liftIO $ setAlarm startAc $ localTimeToUTC currentTimeZone start
+
+  stopTimesE  <- accumE endTimes (tail <$ startE) <&> fmap head
+  startTimesE <- accumE startTimes (tail <$ stopE) <&> fmap head
+
+  setter <- view zwSetValue
+
+  let codeVal = getDeviceValueByName "Code 3" $ getDeviceById home lock
+      codeSetter :: Behavior (Text -> IO ())
+      codeSetter = codeVal & _zwvInfo <&> maybe (const $ pure ()) setValue
+      setValue vInfo s =
+        void $ setter (_dHomeId $ _vDeviceInfo vInfo) lock (_valueId $ _vInfo vInfo) (VString s)
+      enableCode = codeSetter <*> pure code3
+      disableCode = codeSetter <*> pure ""
+
+  lift $ reactimate $ observeE $ stopTimesE <&> \t -> valueB enableCode <&> \enable -> do
+    enable
+    zone <- getTimeZone =<< getCurrentTime
+    setAlarm stopAc $ localTimeToUTC zone t
+
+  lift $ reactimate $ observeE $ startTimesE <&> \t -> valueB disableCode <&> \disable -> do
+    disable
+    zone <- getTimeZone =<< getCurrentTime
+    setAlarm startAc $ localTimeToUTC zone t
+
+  where
+    hoursToNominalDiffTime h = secondsToNominalDiffTime $ h * 60 * 60
+    dowDiff a b = (fromEnum b) - (fromEnum a) `mod` 7
+
+(?:) :: Maybe a -> a -> a
+Just a  ?: _ = a
+Nothing ?: a = a
 
 entranceCfg :: ZWaveHome -> DeviceId -> [DeviceId] -> ZWave MomentIO ()
 entranceCfg home entry lights = do
     let entryDevice = getDeviceById home entry
-        lightDevs =
-            getDeviceValueByName "Level" . getDeviceById home <$> lights
-        doorE     = getDoorEvent entryDevice
-        newLevelE = filterJust $ traverse toLevel <$> doorE
+        lightDevs   = getDeviceValueByName "Level" . getDeviceById home <$> lights
+        doorE       = getDoorEvent entryDevice
+        newLevelE   = filterJust $ traverse toLevel <$> doorE
         toLevel Closed = Nothing
         toLevel Open   = Just 0xFF -- last setting
 
@@ -168,7 +274,7 @@ mkDimmerLight _device = do
 
     applyScene setter = _zwvInfo levelVal <&> \case
       Nothing -> const $ pure ()
-      (Just v@ValueInfo {..}) -> \scene ->
+      (Just ValueInfo {..}) -> \scene ->
         void $ setter (_dHomeId _vDeviceInfo)
           (_deviceId $ _dInfo _vDeviceInfo)
           (_valueId _vInfo)
@@ -190,7 +296,7 @@ mkSwitchLight _device = do
 
     applyScene setter = _zwvInfo switchVal <&> \case
       Nothing -> const $ pure ()
-      (Just v@ValueInfo {..}) -> \scene ->
+      (Just ValueInfo {..}) -> \scene ->
         void $ setter (_dHomeId _vDeviceInfo)
           (_deviceId $ _dInfo _vDeviceInfo)
           (_valueId _vInfo)
@@ -316,12 +422,9 @@ washerCfg addrs home ds = do
         merge :: Map DeviceId Float -> Map DeviceId Float -> Map DeviceId String
         merge = Map.intersectionWith (\o n -> show o ++ " ==> " ++ show n)
 
-        state :: [Float] -> WashState
-        state lvls = if any (> 50.0) lvls then Active else Inactive
-
-        state2 :: Float -> Float -> WashState
-        state2 threshold lvl | threshold < lvl = Active
-                             | otherwise       = Inactive
+        state :: Float -> Float -> WashState
+        state threshold lvl | threshold < lvl = Active
+                            | otherwise       = Inactive
 
         powerEvt :: (DeviceId, String, Float)
                  -> Event (Map DeviceId (Float, Float)
@@ -346,7 +449,7 @@ washerCfg addrs home ds = do
         accumE (([], Inactive), ([], Inactive))
         $   updateState
         .   List.foldl' reduce ([], Inactive)
-        .   fmap (\(d, vs@(_,v)) -> ((d, v), uncurry state2 vs))
+        .   fmap (\(d, vs@(_,v)) -> ((d, v), uncurry state vs))
         .   Map.toList
         <$> stateMapE
     lift . reactimate $ uncurry reactToChange <$> stateChangeE

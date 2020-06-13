@@ -64,6 +64,7 @@ executable smarthome-reactive-client
                      , containers
                      , mtl
                      , aeson
+                     , alarmclock
                      , async
                      , conduit
                      , horizon
