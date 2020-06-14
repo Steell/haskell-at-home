@@ -58,6 +58,7 @@ import           Reactive.Banana.Frameworks     ( AddHandler
                                                 , execute
                                                 , fromAddHandler
                                                 , fromPoll
+                                                , liftIOLater
                                                 , newAddHandler
                                                 , reactimate
                                                 )
@@ -186,7 +187,24 @@ lockCodeCfg home lock code3 (startAc, startHandler) (stopAc, stopHandler) = do
       startTimes@(start : _) = fmap fst schedule'''
       endTimes               = undefined : fmap snd schedule'''
 
-  lift $ liftIO $ setAlarm startAc $ localTimeToUTC currentTimeZone start
+  let instaStart = localTimeToUTC currentTimeZone start
+
+  lift $ liftIOLater $ do
+    print "Current zoned time:"
+    print currentZonedTime
+    print "Current local time:"
+    print currentLocalTime
+    print "Current day:"
+    print currentDay
+    print "Current DOW:"
+    print currentDayOfWeek
+    print "Current time zone:"
+    print currentTimeZone
+    print "Local start time:"
+    print start
+    print "Start time UTC:"
+    print instaStart
+    setAlarm startAc $ instaStart
 
   stopTimesE  <- accumE endTimes (tail <$ startE) <&> fmap head
   startTimesE <- accumE startTimes (tail <$ stopE) <&> fmap head
