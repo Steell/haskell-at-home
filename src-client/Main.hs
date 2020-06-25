@@ -9,8 +9,6 @@ module Main where
 
 import           Api                     hiding ( getValue )
 
-import           Client
-
 import           Control.Arrow
 import           Control.Concurrent.AlarmClock  ( AlarmClock
                                                 , setAlarm
@@ -22,6 +20,7 @@ import           Control.Monad.IO.Class         ( liftIO )
 import           Control.Monad.Trans            ( lift )
 
 import qualified Data.Conduit.Combinators      as Conduit
+import           Data.Fixed                     ( Pico )
 import           Data.Foldable                  ( traverse_ )
 import           Data.Functor                   ( void )
 import qualified Data.List                     as List
@@ -43,7 +42,6 @@ import           Data.Time                      ( DayOfWeek(..)
                                                 , getZonedTime
                                                 , localTimeToUTC
                                                 , midnight
-                                                , nominalDay
                                                 , secondsToNominalDiffTime
                                                 )
 import           Data.Time.Horizon              ( sunrise
@@ -63,9 +61,8 @@ import           Reactive.Banana.Frameworks     ( AddHandler
                                                 , execute
                                                 , fromAddHandler
                                                 , fromPoll
-                                                , liftIOLater
                                                 , newAddHandler
-						, newEvent
+                                                , newEvent
                                                 , reactimate
                                                 , reactimate'
                                                 )
@@ -96,21 +93,17 @@ main :: IO ()
 main = do
     mgr <- newManager defaultManagerSettings
     let cenv = mkClientEnv mgr (BaseUrl Http "localhost" 8081 "")
-    (code3:phoneNumbers) <- getArgs --TODO: make nicer
-
-    --TODO: somehow incorporate this into myconfig
-    (onStart, triggerAlarmStart) <- newAddHandler
-    (onStop, triggerAlarmStop) <- newAddHandler
-    withAlarmClock (\_ _ -> triggerAlarmStart ()) $ \startAlarm -> do
-      withAlarmClock (\_ _ -> triggerAlarmStop ()) $ \stopAlarm -> do
-        lcd <- myLcd startAlarm onStart stopAlarm onStop
-        let cfg = myconfig phoneNumbers (Text.pack code3) lcd
+    (code3:code4:phoneNumbers) <- getArgs --TODO: make nicer
+    withLcd mySchedule $ \dogLcd ->
+      withLcd cleanSchedule $ \cleanLcd -> do
+        let cfg = myconfig phoneNumbers (Text.pack code3) (Text.pack code4) dogLcd cleanLcd
         (eventHandler, writeEvent) <- newAddHandler
         (stateHandler, writeState) <- newAddHandler
         let client  = clientIO cenv
             netDesc = dNetwork client cfg stateHandler eventHandler
         compile netDesc >>= actuate
-        startTheAlarm lcd
+        startTheAlarm dogLcd
+        startTheAlarm cleanLcd
         race_ (thread (handleState client) writeState)
               (thread (handleEvents client) writeEvent)
   where
@@ -129,9 +122,11 @@ data DoorState = Open | Closed
 
 myconfig :: [String]
          -> Text
+         -> Text
+         -> LockCodeData
          -> LockCodeData
          -> ZWave MomentIO ()
-myconfig phoneNumbers code3 lcd = do
+myconfig phoneNumbers code3 code4 dogLcd cleanLcd = do
     home <- getHome
 
     let (basementStairsD : basementDimmersD) = getDeviceById home <$> basement
@@ -155,7 +150,8 @@ myconfig phoneNumbers code3 lcd = do
 
     entranceCfg home frontDoorSensor [livingroomEntry]
 
-    lockCodeCfg home frontDoorLock code3 lcd
+    lockCodeCfg home frontDoorLock 3 code3 dogLcd
+    lockCodeCfg home frontDoorLock 4 code4 cleanLcd
     --batteryEmail addrs frontDoorLock
 
     let addrs = SMTP.Address Nothing . Text.pack <$> phoneNumbers
@@ -193,99 +189,132 @@ data LockCodeData = LockCodeData { _startAc :: AlarmClock UTCTime
 pairwise :: [a] -> [(a, a)]
 pairwise xs = xs `zip` (drop 1 $ cycle xs)
 
-myLcd startAc startAh stopAc stopAh = do
-    currentZonedTime <- getZonedTime
+type Schedule = ([(DayOfWeek, TimeOfDay, NominalDiffTime)], Integer)
 
-    let schedule :: [(DayOfWeek, TimeOfDay, NominalDiffTime)]
-        schedule = ((, TimeOfDay 10 0 0, hoursToNominalDiffTime 6) <$> [Monday, Tuesday, Thursday])
+mySchedule :: Schedule
+mySchedule = ((, TimeOfDay 10 0 0, hoursToNominalDiffTime 6) <$> [Monday, Tuesday, Thursday], 1)
 
-        currentLocalTime = zonedTimeToLocalTime currentZonedTime
-        currentDay       = localDay currentLocalTime
-        currentTimeOfDay = localTimeOfDay currentLocalTime
-        currentDayOfWeek = dayOfWeek currentDay
-        currentTimeZone  = zonedTimeZone currentZonedTime
+cleanSchedule :: Schedule
+cleanSchedule = ([(Wednesday, TimeOfDay 10 0 0, hoursToNominalDiffTime 8)], 2)
 
-        toNominal = daysAndTimeOfDayToTime 0
-
-        past (dow, tod, d) =
-          (fromEnum dow) < (fromEnum currentDayOfWeek)
-            || dow == currentDayOfWeek && toNominal tod + d < toNominal currentTimeOfDay
-
-        schedule0 = dropWhile past schedule
-        schedule' = schedule0 <> cycle schedule
-
-        getScheduledZonedTime :: (LocalTime, NominalDiffTime)
-                              -> (DayOfWeek, TimeOfDay, NominalDiffTime)
-                              -> (LocalTime, NominalDiffTime)
-        getScheduledZonedTime (prevLocalTime, _) (dow, tod, duration) =
-          let prevDay       = localDay prevLocalTime
-              prevDayOfWeek = dayOfWeek prevDay
-              prevTimeOfDay = localTimeOfDay prevLocalTime
-              diffDay       = toInteger $ dowDiff prevDayOfWeek dow
-              nextLocalTime = daysAndTimeOfDayToTime diffDay tod
-                                `addLocalTime` (prevLocalTime { localTimeOfDay = midnight })
-          in
-            (nextLocalTime, duration)
-
-        schedule'' = tail $ List.scanl' getScheduledZonedTime (currentLocalTime, undefined) schedule'
-        schedule''' = fmap (\(lt, diff) -> (lt, diff `addLocalTime` lt)) schedule''
-
-        startTimes = fmap fst schedule'''
-        endTimes   = undefined : fmap snd schedule'''
-
-    return LockCodeData { _startAc = startAc
-                        , _startHandler = startAh
-                        , _endAc = stopAc
-                        , _endHandler = stopAh
-                        , _startTimes = startTimes
-                        , _endTimes = endTimes
-                        }
+withLcd :: Schedule -> (LockCodeData -> IO a) -> IO a
+withLcd schedule f = do
+    (onStart, triggerAlarmStart) <- newAddHandler
+    (onStop, triggerAlarmStop) <- newAddHandler
+    withAlarmClock (\_ _ -> triggerAlarmStart ()) $ \startAlarm ->
+      withAlarmClock (\_ _ -> triggerAlarmStop ()) $ \stopAlarm ->
+        f =<< mkLcd schedule startAlarm onStart stopAlarm onStop
   where
-    hoursToNominalDiffTime h = secondsToNominalDiffTime $ h * 60 * 60
-    dowDiff a b = ((fromEnum b) - (fromEnum a)) `mod` 7
+    mkLcd' schedule startAc starAh stopAc stopAh = do
+      currentZonedTime <- getZonedTime
+      let currentLocalTime = zonedTimeToLocalTime currentZonedTime
+      undefined
+
+    mkLcd (schedule, interval) startAc startAh stopAc stopAh = do
+        currentZonedTime <- getZonedTime
+        let currentLocalTime = zonedTimeToLocalTime currentZonedTime
+            currentDay       = localDay currentLocalTime
+            currentTimeOfDay = localTimeOfDay currentLocalTime
+            currentDayOfWeek = dayOfWeek currentDay
+
+            toNominal :: TimeOfDay -> NominalDiffTime
+            toNominal = daysAndTimeOfDayToTime 0
+
+            past (dow, tod, d) =
+              (fromEnum dow) < (fromEnum currentDayOfWeek)
+                || dow == currentDayOfWeek && toNominal tod + d < toNominal currentTimeOfDay
+
+            scheduleFromNow = (dropWhile past schedule) <> cycle schedule
+
+            getScheduledZonedTime :: (LocalTime, NominalDiffTime)
+                                  -> (DayOfWeek, TimeOfDay, NominalDiffTime)
+                                  -> (LocalTime, NominalDiffTime)
+            getScheduledZonedTime (prevLocalTime, _) (dow, tod, duration) =
+              let prevDay       = localDay prevLocalTime
+                  prevTod       = localTimeOfDay prevLocalTime
+                  prevDayOfWeek = dayOfWeek prevDay
+                  diffDay       = let diff   = fromEnum dow - fromEnum prevDayOfWeek
+                                      modded = toInteger $ diff `mod` 7
+                                      isWeekBoundary = diff < 0 || diff == 0 && prevTod < tod
+                                  in if isWeekBoundary then
+                                       modded + 7 * (interval - 1)
+                                     else
+                                       modded
+                  nextLocalTime = daysAndTimeOfDayToTime diffDay tod
+                                    `addLocalTime` (prevLocalTime { localTimeOfDay = midnight })
+              in
+                (nextLocalTime, duration)
+
+            -- TODO: there must be a nicer way to accomplish this without prepending the current time
+            --       and then dropping it from the scan
+            scheduledLocalTimes =
+              fmap (\(lt, diff) -> (lt, diff `addLocalTime` lt))
+                $ tail
+                $ List.scanl' getScheduledZonedTime (currentLocalTime, undefined) scheduleFromNow
+
+            startTimes = fmap fst scheduledLocalTimes
+            endTimes   = fmap snd scheduledLocalTimes
+
+        return LockCodeData { _startAc = startAc
+                            , _startHandler = startAh
+                            , _endAc = stopAc
+                            , _endHandler = stopAh
+                            , _startTimes = startTimes
+                            , _endTimes = endTimes
+                            }
+      where
+        dowDiff a b = ((fromEnum b) - (fromEnum a)) `mod` 7
+
+hoursToNominalDiffTime :: Pico -> NominalDiffTime
+hoursToNominalDiffTime h = secondsToNominalDiffTime $ h * 60 * 60
 
 lockCodeCfg :: ZWaveHome
             -> DeviceId
+            -> Integer
             -> Text
             -> LockCodeData
             -> ZWave MomentIO ()
-lockCodeCfg home lock code3 LockCodeData{..} = do
-
+lockCodeCfg home lock codeNum code LockCodeData{..} = do
     setter <- view zwSetValue
-
     startE <- lift $ fromAddHandler _startHandler
     stopE <- lift $ fromAddHandler _endHandler
-    stopTimesE  <- accumE _endTimes (tail <$ startE) <&> fmap head
+    stopTimesE  <- accumE (undefined : _endTimes) (tail <$ startE) <&> fmap head
     startTimesE <- accumE _startTimes (tail <$ stopE) <&> fmap head
-
     let setValue s vInfo =
-	  void $ setter (_dHomeId $ _vDeviceInfo vInfo) lock (_valueId $ _vInfo vInfo) s
-	codeVal = getDeviceValueByName "Code 3:" $ getDeviceById home lock
-	codeSetter = codeVal & _zwvInfo <&> fmap (setValue (VString code3))
-	resetVal = getDeviceValueByName "Remove User Code" $ getDeviceById home lock
-	codeResetter = resetVal & _zwvInfo <&> fmap (setValue (VShort 3))
+          -- TODO: this is gross, abstract a lot of this out
+          void $ setter (_dHomeId $ _vDeviceInfo vInfo) lock (_valueId $ _vInfo vInfo) s
+        codeVal = getDeviceValueByName ("Code " <> show codeNum <> ":") $ getDeviceById home lock
+        codeSetter = codeVal & _zwvInfo <&> fmap (setValue (VString code))
+        resetVal = getDeviceValueByName "Remove User Code" $ getDeviceById home lock
+        codeResetter = resetVal & _zwvInfo <&> fmap (setValue (VShort codeNum))
 
-        -- TODO: would be great if we didn't have to use changes' here
+        -- TODO: would be great if we didn't have to use this, and instead just had access to an
+        --       event of all of a value's changes
+        --
+        --       Also, we can't just use `changes` and have to use this wrapper because
+        --       AFAIK there's no way to use mapAccum with the Future coming from `changes`
         changes' b = do
-	  (e, handle) <- newEvent
+          (e, handle) <- newEvent
           eb <- changes b
           reactimate' $ (fmap handle) <$> eb
           return e
-
     codeSetterE   <- lift $ changes' codeSetter
     codeResetterE <- lift $ changes' codeResetter
-
     let enableCodeE  = codeSetterE   <&> updateCodeSetter
-	disableCodeE = codeResetterE <&> updateCodeResetter
-	onStartedE   = stopTimesE    <&> enableCodeForDuration
-	onStoppedE   = startTimesE   <&> disableCodeForDuration
-
+        disableCodeE = codeResetterE <&> updateCodeResetter
+        onStartedE   = stopTimesE    <&> enableCodeForDuration
+        onStoppedE   = startTimesE   <&> disableCodeForDuration
     (actionE, _) <- mapAccum initialState
-      $ mergeE const [ enableCodeE, disableCodeE, onStartedE, onStoppedE ]
+      $ mergeE combineUpdates [ enableCodeE, disableCodeE, onStartedE, onStoppedE ]
 
     lift $ reactimate $ filterJust actionE
 
   where
+    combineUpdates f g a0 =
+      let (x1, a1) = f a0
+          (x2, a2) = g a1
+      in (x1 <> x2, a2)
+
     updateCodeSetter setter state@(LockCfgState {..}) =
       let action = case (setter, _codeSetter, _duration, _enabled) of
                      (Just s, Nothing, Just d, True) -> Just (doEnable d s)
@@ -316,22 +345,22 @@ lockCodeCfg home lock code3 LockCodeData{..} = do
                                 , _codeResetter = Nothing
                                 }
 
+    doDisable, doEnable :: LocalTime -> IO () -> IO ()
     doDisable t reset = do
-      print "CODE OFF"
+      putStrLn "CODE OFF"
       reset
-      zone <- getTimeZone =<< getCurrentTime
+      zone <- zonedTimeZone <$> getZonedTime
       let startTime = localTimeToUTC zone t
-      print "Starting at:"
+      putStrLn "Starting at:"
       print $ "  local: " <> show t
       print $ "  zoned: " <> show startTime
       setAlarm _startAc $ startTime
-      
     doEnable t set = do
-      print "CODE ON"
+      putStrLn "CODE ON"
       set
       zone <- getTimeZone =<< getCurrentTime
       let startTime = localTimeToUTC zone t
-      print "Stopping at:"
+      putStrLn "Stopping at:"
       print $ "  local: " <> show t
       print $ "  zoned: " <> show startTime
       setAlarm _endAc $ startTime
@@ -398,7 +427,6 @@ mkLockLightIGuess _device = do
     return Light {..}
   where
     levelVal = getDeviceValueByName "Locked" _device
-
     applyScene setter = _zwvInfo levelVal <&> \case
       Nothing -> const $ pure ()
       (Just ValueInfo {..}) -> \scene -> case toLevel scene of
@@ -407,12 +435,10 @@ mkLockLightIGuess _device = do
             (_deviceId $ _dInfo _vDeviceInfo)
             (_valueId _vInfo)
             (VBool b)
-	Nothing -> pure ()
-
+        Nothing -> pure ()
     toLevel :: Scene -> Maybe Bool
     toLevel (TriplePress, Down) = Just True
     toLevel _                   = Nothing
-
 
 mkDimmerLight :: Monad m => ZWaveDevice -> ZWave m Light
 mkDimmerLight _device = do
@@ -421,7 +447,6 @@ mkDimmerLight _device = do
     return Light {..}
   where
     levelVal = getDeviceValueByName "Level" _device
-
     applyScene setter = _zwvInfo levelVal <&> \case
       Nothing -> const $ pure ()
       (Just ValueInfo {..}) -> \scene ->
@@ -429,7 +454,6 @@ mkDimmerLight _device = do
           (_deviceId $ _dInfo _vDeviceInfo)
           (_valueId _vInfo)
           (VByte $ toLevel scene)
-
     toLevel :: Scene -> Integer
     toLevel (DoublePress, Up)   = 0xFF
     toLevel (DoublePress, Down) = 0
@@ -483,6 +507,7 @@ ff >$> g = fmap g . ff
 (<$<) :: Functor f => (b -> c) -> (a -> f b) -> a -> f c
 (<$<) = flip (>$>)
 
+globalCfg2 :: [Light] -> [Light] -> ZWave MomentIO ()
 globalCfg2 = roomLightCfg
 
 globalCfg :: ZWaveHome -> [DeviceId] -> ZWave MomentIO ()
